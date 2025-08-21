@@ -1,0 +1,24 @@
+
+º
+;
+android*http://schemas.android.com/apk/res/androidH
+layer-list*â
+Ùitem*Ğ
+Çbitmap"q
+*http://schemas.android.com/apk/res/androidsrc@drawable/background"(™‚„2
+€˜ødrawable/background0"J
+*http://schemas.android.com/apk/res/androidgravityfill"(¯„2:8wL*Ü
+Óitem*Ê
+Ábitmap"i
+*http://schemas.android.com/apk/res/androidsrc@drawable/splash"(™‚„2
+­€˜ødrawable/splash0"L
+*http://schemas.android.com/apk/res/androidgravitycenter"(¯„2:8J*ª
+¡item"H
+*http://schemas.android.com/apk/res/androidbottom0dp"	(°ƒ„2:h*Î
+Åbitmap"m
+*http://schemas.android.com/apk/res/androidsrc@drawable/branding"
+(™‚„2
+‚€˜ødrawable/branding0"L
+*http://schemas.android.com/apk/res/androidgravitybottom"
+(¯„2:8P
+L	 H
