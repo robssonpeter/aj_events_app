@@ -17,7 +17,7 @@ plugins {
 
 android {
     namespace = "net.ajiriwa.events"
-    compileSdk = 35//flutter.compileSdkVersion
+    compileSdk = 36//flutter.compileSdkVersion
     ndkVersion = "27.0.12077973"
 
     compileOptions {
@@ -34,10 +34,15 @@ android {
         applicationId = "net.ajiriwa.events"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = 21//flutter.minSdkVersion
-        targetSdk = 35//flutter.targetSdkVersion
+        minSdk = flutter.minSdkVersion//flutter.minSdkVersion
+        targetSdk = 36//flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // Add support for 16 KB memory page sizes (required by Google by Nov 1, 2025)
+        ndk {
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+        }
     }
 
     signingConfigs {

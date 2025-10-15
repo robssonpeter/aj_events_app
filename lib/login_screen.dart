@@ -186,6 +186,35 @@ class _LoginScreenState extends State<LoginScreen> {
                       child: const Text('Login'),
                     ),
                   ),
+
+                  const SizedBox(height: 20),
+                  const Text(
+                    'OR',
+                    style: TextStyle(color: Colors.black54),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Enter Event Code button
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.lock_open),
+                      label: const Text('Enter Event Code', style: TextStyle(color: primaryColor),),
+                      style: ElevatedButton.styleFrom(
+                        side: const BorderSide(color: primaryColor),
+                        backgroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        textStyle: const TextStyle(fontSize: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                      onPressed: () {
+                        Navigator.pushNamed(context, '/event-code');
+                      },
+                    ),
+                  ),
                 ],
               ),
             ),

@@ -1,8 +1,10 @@
 import 'dart:io';
+import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:aj_events/theme.dart';
 import 'package:flutter/material.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_gallery_saver/image_gallery_saver.dart';
 import 'package:path_provider/path_provider.dart';
@@ -10,6 +12,11 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:image_picker/image_picker.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:cross_file/cross_file.dart';
+import 'package:excel/excel.dart';
 
 import 'common.dart';
 import 'api_service.dart';
@@ -24,7 +31,9 @@ class ManageInviteesScreen extends StatefulWidget {
 
 class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
   List invitees = [];
+  List filteredInvitees = [];
   int currentPage = 1, lastPage = 1;
+  int totalFilteredInvitees = 0; // Store the total count from the API
   bool isLoading = false;
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
@@ -34,16 +43,151 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
   bool isBulkMode = false;
   Set<int> selectedInviteeIds = {};
 
+  // Search functionality
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+  Timer? _searchDebounceTimer;
+
+  // Filter states
+  bool _isFilterActive = false;
+  bool? _filterWhatsappStatus;
+  bool? _filterInvitationSent;
+  String? _filterAttendanceStatus;
+  bool? _filterCardRedeemed;
+  bool? _filterSeenStatus;
+
+  // Template states
+  Map<String, dynamic> _templates = {
+    'whatsapp': null,
+    'sms': null,
+    'download_card': null,
+  };
+  bool _isLoadingTemplates = false;
+
   final ScrollController _scrollController = ScrollController();
 
   @override
   void initState() {
     super.initState();
     fetchInvitees();
+    _fetchTemplates();
     _scrollController.addListener(_onScroll);
+    // Initialize filtered list
+    filteredInvitees = List.from(invitees);
+  }
+
+  // Fetch templates from the API
+  Future<void> _fetchTemplates() async {
+    setState(() => _isLoadingTemplates = true);
+
+    try {
+      final response = await ApiService.fetchTemplates(widget.eventId);
+
+      setState(() {
+        if (response['data'] != null) {
+          final template = response['data'];
+
+          // Create template objects for WhatsApp, SMS, and Download Card
+          // All are stored in the same template object with different fields
+          if (template['whatsapp_message'] != null) {
+            _templates['whatsapp'] = {
+              'id': template['id'],
+              'type': 'whatsapp',
+              'whatsapp_message': template['whatsapp_message'],
+              'event_id': template['event_id']
+            };
+          }
+
+          if (template['message'] != null) {
+            _templates['sms'] = {
+              'id': template['id'],
+              'type': 'sms',
+              'message': template['message'],
+              'event_id': template['event_id']
+            };
+          }
+
+          if (template['download_card_message'] != null) {
+            _templates['download_card'] = {
+              'id': template['id'],
+              'type': 'download_card',
+              'download_card_message': template['download_card_message'],
+              'event_id': template['event_id']
+            };
+          }
+        }
+        _isLoadingTemplates = false;
+      });
+    } catch (e) {
+      setState(() => _isLoadingTemplates = false);
+      // Silently handle error - templates will be created if they don't exist
+      debugPrint('Error fetching templates: $e');
+    }
+  }
+
+  // Apply filters by fetching filtered data from API
+  Future<void> _applyFilters() async {
+    // Reset pagination for new filter/search
+    setState(() {
+      currentPage = 1;
+      lastPage = 1;
+      filteredInvitees = [];
+      isLoading = true;
+    });
+
+    await _fetchFilteredInvitees();
+  }
+
+  Future<void> _fetchFilteredInvitees() async {
+    if (isLoading && currentPage > 1) return; // Prevent multiple concurrent requests while paginating
+    if (currentPage > lastPage && currentPage > 1) return; // Don't fetch if we're past the last page
+
+    setState(() => isLoading = true);
+
+    try {
+      final response = await ApiService.fetchFilteredInviteesPaginated(
+        eventId: widget.eventId,
+        page: currentPage,
+        searchQuery: _searchQuery.isNotEmpty ? _searchQuery : null,
+        whatsappStatus: _filterWhatsappStatus,
+        invitationSent: _filterInvitationSent,
+        attendanceStatus: _filterAttendanceStatus,
+        cardRedeemed: _filterCardRedeemed,
+        seenStatus: _filterSeenStatus,
+      );
+
+      setState(() {
+        // If this is the first page, replace the list
+        // Otherwise, append to the existing list
+        if (currentPage == 1) {
+          filteredInvitees = List.from(response['data']);
+        } else {
+          filteredInvitees.addAll(response['data']);
+        }
+
+        // Store the total count from the API response
+        totalFilteredInvitees = response['total'] ?? 0;
+
+        lastPage = response['last_page'];
+        currentPage++;
+        isLoading = false;
+      });
+    } catch (e) {
+      setState(() => isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to fetch invitees: $e')),
+      );
+    }
   }
 
   Future<void> fetchInvitees() async {
+    // If we have active filters or search, use the filtered fetch method
+    if (_isFilterActive || _searchQuery.isNotEmpty) {
+      await _fetchFilteredInvitees();
+      return;
+    }
+
+    // Otherwise, fetch all invitees without filtering
     if (isLoading || currentPage > lastPage) return;
 
     setState(() => isLoading = true);
@@ -71,13 +215,20 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
   void _onScroll() {
     if (_scrollController.position.pixels >=
         _scrollController.position.maxScrollExtent - 200) {
-      fetchInvitees();
+      // Use the appropriate fetch method based on whether filters or search are active
+      if (_isFilterActive || _searchQuery.isNotEmpty) {
+        _fetchFilteredInvitees();
+      } else {
+        fetchInvitees();
+      }
     }
   }
 
   @override
   void dispose() {
     _scrollController.dispose();
+    _searchController.dispose();
+    _searchDebounceTimer?.cancel();
     super.dispose();
   }
 
@@ -134,27 +285,53 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
                         child: Text(
                           invitee['name'],
                           style: Theme.of(context).textTheme.titleMedium,
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
                         ),
                       ),
                       if (!isBulkMode)
                         PopupMenuButton<String>(
                           onSelected: (value) => _handleAction(value, invitee),
                           icon: Icon(Icons.more_vert, color: accentColor),
-                          itemBuilder: (context) => [
-                            const PopupMenuItem(value: 'send', child: Text('Send Invitation')),
-                            const PopupMenuItem(value: 'preview', child: Text('Preview Card')),
-                            const PopupMenuItem(value: 'edit', child: Text('Edit')),
-                            const PopupMenuItem(value: 'delete', child: Text('Delete')),
-                          ],
+                          itemBuilder: (context) {
+                            final isOnWhatsapp = invitee['is_on_whatsapp'] == 1 || invitee['is_on_whatsapp'] == true;
+                            final isSeen = invitee['is_seen'] == 1 || invitee['is_seen'] == true;
+                            return [
+                              const PopupMenuItem(value: 'send', child: Text('Send Invitation')),
+                              const PopupMenuItem(value: 'render_sms', child: Text('Render SMS')),
+                              const PopupMenuItem(value: 'call', child: Text('Call')),
+                              if (isOnWhatsapp)
+                                const PopupMenuItem(value: 'mark_whatsapp_sent', child: Text('Mark WhatsApp Sent')),
+                              if (!isSeen)
+                                const PopupMenuItem(value: 'mark_seen', child: Text('Mark as Seen')),
+                              const PopupMenuItem(value: 'send_download_card', child: Text('Send Download Card Msg')),
+                              const PopupMenuItem(value: 'preview', child: Text('Preview Card')),
+                              const PopupMenuItem(value: 'edit', child: Text('Edit')),
+                              const PopupMenuItem(value: 'delete', child: Text('Delete')),
+                            ];
+                          },
                         ),
                     ],
                   ),
                   const SizedBox(height: 4),
-                  Text(
-                    'Phone: ${invitee['phone_number']}',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: Colors.black54,
-                    ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Phone: ${invitee['phone_number']}',
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: Colors.black54,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (invitee['is_on_whatsapp'] == 1 || invitee['is_on_whatsapp'] == true)
+                        const FaIcon(
+                          FontAwesomeIcons.whatsapp,
+                          color: Colors.green,
+                          size: 16,
+                        ),
+                    ],
                   ),
                   const SizedBox(height: 4),
                   Text(
@@ -162,7 +339,37 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: Colors.black54,
                     ),
+                    overflow: TextOverflow.ellipsis,
                   ),
+                  const SizedBox(height: 4),
+                  // Show attendance status if it's attending or not attending
+                  if (invitee['attendance_status'] == 'attending' || invitee['attendance_status'] == 'not_attending')
+                    Row(
+                      children: [
+                        Icon(
+                          invitee['attendance_status'] == 'attending' 
+                              ? Icons.check_circle 
+                              : Icons.cancel,
+                          size: 16,
+                          color: invitee['attendance_status'] == 'attending' 
+                              ? Colors.green 
+                              : Colors.red,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          invitee['attendance_status'] == 'attending' 
+                              ? 'Attending' 
+                              : 'Not Attending',
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: invitee['attendance_status'] == 'attending' 
+                                ? Colors.green 
+                                : Colors.red,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
                 ],
               ),
             ),
@@ -179,25 +386,193 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
       case 'send':
         _sendInvitation(invitee);
         break;
-        // TODO: Implement send invitation logic
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Sending invitation to ${invitee['name']}')),
-        );
+      case 'render_sms':
+        _renderSmsMessage(invitee);
+        break;
+      case 'call':
+        _makePhoneCall(invitee);
+        break;
+      case 'mark_whatsapp_sent':
+        _markWhatsappInvitationSent(invitee);
+        break;
+      case 'mark_seen':
+        _markInviteeSeen(invitee);
+        break;
+      case 'send_download_card':
+        _sendDownloadCardMessage(invitee);
         break;
       case 'preview':
-      // TODO: Implement preview logic
         _showPreviewDialog(invitee['slug']);
         break;
-        /*ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Previewing invitation for ${invitee['name']}')),
-        );
-        break;*/
       case 'edit':
         _showEditInviteeDialog(invitee);
         break;
       case 'delete':
         _confirmDelete(invitee);
         break;
+    }
+  }
+
+  Future<void> _markWhatsappInvitationSent(Map invitee) async {
+    final name = invitee['name'];
+    final inviteeId = invitee['id'];
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Marking WhatsApp invitation as sent for $name...')),
+    );
+
+    try {
+      final result = await ApiService.markWhatsappInvitationSent(
+        eventId: widget.eventId,
+        inviteeId: inviteeId,
+      );
+
+      // Refresh the invitee data
+      setState(() {
+        // Find the invitee in the lists and update it
+        // Update the invitee in both lists
+        for (int i = 0; i < invitees.length; i++) {
+          if (invitees[i]['id'] == inviteeId) {
+            // Create a new map with the updated value
+            Map<String, dynamic> updatedInvitee = Map<String, dynamic>.from(invitees[i]);
+            updatedInvitee['invitation_sent'] = true;
+            invitees[i] = updatedInvitee;
+            break;
+          }
+        }
+
+        for (int i = 0; i < filteredInvitees.length; i++) {
+          if (filteredInvitees[i]['id'] == inviteeId) {
+            // Create a new map with the updated value
+            Map<String, dynamic> updatedInvitee = Map<String, dynamic>.from(filteredInvitees[i]);
+            updatedInvitee['invitation_sent'] = true;
+            filteredInvitees[i] = updatedInvitee;
+            break;
+          }
+        }
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('WhatsApp invitation marked as sent for $name')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to mark WhatsApp invitation as sent for $name: $e')),
+      );
+    }
+  }
+
+  Future<void> _makePhoneCall(Map invitee) async {
+    final phoneNumber = invitee['phone_number'];
+    if (phoneNumber == null || phoneNumber.toString().trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Phone number is not available')),
+      );
+      return;
+    }
+
+    final Uri phoneUri = Uri(
+      scheme: 'tel',
+      path: phoneNumber.toString(),
+    );
+
+    try {
+      if (await canLaunchUrl(phoneUri)) {
+        await launchUrl(phoneUri);
+      } else {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not launch phone app')),
+          );
+        }
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error making phone call: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _markInviteeSeen(Map invitee) async {
+    final name = invitee['name'];
+    final inviteeId = invitee['id'];
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Marking invitation as seen for $name...')),
+    );
+
+    try {
+      final result = await ApiService.markInviteeSeen(
+        eventId: widget.eventId,
+        inviteeId: inviteeId,
+      );
+
+      // Refresh the invitee data
+      setState(() {
+        // Find the invitee in the lists and update it
+        // Update the invitee in both lists
+        for (int i = 0; i < invitees.length; i++) {
+          if (invitees[i]['id'] == inviteeId) {
+            // Create a new map with the updated value
+            Map<String, dynamic> updatedInvitee = Map<String, dynamic>.from(invitees[i]);
+            updatedInvitee['is_seen'] = true;
+            invitees[i] = updatedInvitee;
+            break;
+          }
+        }
+
+        for (int i = 0; i < filteredInvitees.length; i++) {
+          if (filteredInvitees[i]['id'] == inviteeId) {
+            // Create a new map with the updated value
+            Map<String, dynamic> updatedInvitee = Map<String, dynamic>.from(filteredInvitees[i]);
+            updatedInvitee['is_seen'] = true;
+            filteredInvitees[i] = updatedInvitee;
+            break;
+          }
+        }
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Invitation marked as seen for $name')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to mark invitation as seen for $name: $e')),
+      );
+    }
+  }
+
+  Future<void> _sendDownloadCardMessage(Map invitee) async {
+    final name = invitee['name'];
+    final inviteeId = invitee['id'];
+
+    // Check if download card template exists
+    if (_templates['download_card'] == null || _templates['download_card']['download_card_message'] == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No download card message template found. Please create one first.')),
+      );
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Sending download card message to $name...')),
+    );
+
+    try {
+      final result = await ApiService.sendDownloadCardMessage(
+        eventId: widget.eventId,
+        inviteeId: inviteeId,
+      );
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Download card message sent to $name successfully')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to send download card message to $name: $e')),
+      );
     }
   }
 
@@ -221,23 +596,643 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
     }
   }
 
+  void _renderSmsMessage(Map invitee) {
+    // Check if SMS template exists
+    if (_templates['sms'] == null || _templates['sms']['message'] == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No SMS template found. Please create one first.')),
+      );
+      return;
+    }
+
+    final String template = _templates['sms']['message'];
+    final String name = invitee['name'] ?? '';
+    final String code = invitee['invitation_code'] ?? '';
+    final String phoneNumber = invitee['phone_number'] ?? '';
+    final int numberOfInvitees = invitee['number_of_invitees'] ?? 1;
+
+    // Determine type based on number of invitees
+    String type = 'Single';
+    if (numberOfInvitees == 2) {
+      type = 'Double';
+    } else if (numberOfInvitees > 2) {
+      type = 'Triple';
+    }
+
+    // Replace placeholders with actual values
+    String renderedMessage = template
+      .replaceAll('{name}', name)
+      .replaceAll('{code}', code)
+      .replaceAll('{invitation_code}', code) // Alternative placeholder
+      .replaceAll('{type}', type)
+      .replaceAll('{link}', 'https://events.ajiriwa.net/invitation/$code');
+
+    // Show modal with rendered message
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Rendered SMS Message'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Preview of the SMS message with placeholders replaced:',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.grey[200],
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  renderedMessage,
+                  style: const TextStyle(fontSize: 16),
+                ),
+              ),
+              const SizedBox(height: 16),
+              if (phoneNumber.isNotEmpty)
+                Text(
+                  'This message will be sent to: $phoneNumber',
+                  style: const TextStyle(fontSize: 14, fontStyle: FontStyle.italic),
+                ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          if (phoneNumber.isNotEmpty)
+            ElevatedButton.icon(
+              icon: const Icon(Icons.sms),
+              label: const Text('Send Message'),
+              onPressed: () async {
+                final Uri smsUri = Uri(
+                  scheme: 'sms',
+                  path: phoneNumber,
+                  queryParameters: {'body': renderedMessage},
+                );
+
+                if (await canLaunchUrl(smsUri)) {
+                  await launchUrl(smsUri);
+                } else {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Could not launch messaging app')),
+                    );
+                  }
+                }
+
+                if (context.mounted) {
+                  Navigator.pop(context);
+                }
+              },
+            ),
+        ],
+      ),
+    );
+  }
 
 
-  Widget _actionButton(IconData icon, String label, VoidCallback onTap) {
+
+  Widget _actionButton(IconData icon, String label, VoidCallback onTap, {bool isActive = false}) {
     return GestureDetector(
       onTap: onTap,
       child: Column(
         children: [
-          Icon(icon, color: accentColor, size: 20),
+          Stack(
+            alignment: Alignment.topRight,
+            children: [
+              Icon(icon, color: isActive ? Colors.green : accentColor, size: 20),
+              if (isActive)
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: const BoxDecoration(
+                    color: Colors.green,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+            ],
+          ),
           const SizedBox(height: 2),
           Text(
             label,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: accentColor,
+              color: isActive ? Colors.green : accentColor,
               fontWeight: FontWeight.w500,
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  // Show template options dropdown
+  void _showTemplateOptions() {
+    showDialog(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('Select Template Type'),
+        children: [
+          ListTile(
+            leading: Icon(Icons.message, color: Colors.green),
+            title: const Text('WhatsApp Template'),
+            onTap: () {
+              Navigator.pop(context);
+              _showTemplateEditor('whatsapp');
+            },
+          ),
+          ListTile(
+            leading: Icon(Icons.sms, color: Colors.blue),
+            title: const Text('SMS Template'),
+            onTap: () {
+              Navigator.pop(context);
+              _showTemplateEditor('sms');
+            },
+          ),
+          ListTile(
+            leading: Icon(Icons.credit_card, color: Colors.orange),
+            title: const Text('Card Download Message'),
+            onTap: () {
+              Navigator.pop(context);
+              _showTemplateEditor('download_card');
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Show template editor dialog
+  void _showTemplateEditor(String templateType) {
+    final templateController = TextEditingController();
+    final existingTemplate = _templates[templateType];
+
+    // Pre-populate with existing template if available
+    if (existingTemplate != null) {
+      if (templateType == 'whatsapp' && existingTemplate['whatsapp_message'] != null) {
+        templateController.text = existingTemplate['whatsapp_message'];
+      } else if (templateType == 'sms' && existingTemplate['message'] != null) {
+        templateController.text = existingTemplate['message'];
+      } else if (templateType == 'download_card' && existingTemplate['download_card_message'] != null) {
+        templateController.text = existingTemplate['download_card_message'];
+      }
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          bool isSaving = false;
+
+          return AlertDialog(
+            title: Text(
+              templateType == 'whatsapp' 
+                ? 'WhatsApp Template' 
+                : templateType == 'sms' 
+                  ? 'SMS Template' 
+                  : 'Card Download Message'
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Enter your message template. You can use the following placeholders:',
+                    style: TextStyle(fontSize: 14),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      _placeholderChip('{name}', templateController),
+                      _placeholderChip('{code}', templateController),
+                      _placeholderChip('{link}', templateController),
+                      _placeholderChip('{type}', templateController),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: templateController,
+                    maxLines: 8,
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                      hintText: 'Enter your message template here...',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: isSaving 
+                  ? null 
+                  : () async {
+                    setDialogState(() => isSaving = true);
+
+                    try {
+                      final content = templateController.text.trim();
+
+                      if (content.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Template cannot be empty')),
+                        );
+                        setDialogState(() => isSaving = false);
+                        return;
+                      }
+
+                      Map<String, dynamic> result;
+
+                      if (existingTemplate != null) {
+                        // Update existing template
+                        result = await ApiService.updateTemplate(
+                          templateId: existingTemplate['id'],
+                          content: content,
+                          type: templateType,
+                        );
+                      } else {
+                        // Create new template
+                        result = await ApiService.saveTemplate(
+                          eventId: widget.eventId,
+                          type: templateType,
+                          content: content,
+                        );
+                      }
+
+                      setState(() {
+                        // Create template object with the correct structure
+                        _templates[templateType] = {
+                          'id': result['data']['id'],
+                          'type': templateType,
+                          'event_id': result['data']['event_id'],
+                        };
+
+                        // Add the appropriate message field based on template type
+                        if (templateType == 'whatsapp') {
+                          _templates[templateType]['whatsapp_message'] = content;
+                        } else if (templateType == 'sms') {
+                          _templates[templateType]['message'] = content;
+                        } else if (templateType == 'download_card') {
+                          _templates[templateType]['download_card_message'] = content;
+                        }
+                      });
+
+                      Navigator.pop(context);
+
+                      String templateName = templateType == 'whatsapp' 
+                          ? 'WhatsApp' 
+                          : templateType == 'sms' 
+                              ? 'SMS' 
+                              : 'Card Download Message';
+
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('$templateName template saved successfully')),
+                      );
+                    } catch (e) {
+                      setDialogState(() => isSaving = false);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Error saving template: $e')),
+                      );
+                    }
+                  },
+                child: isSaving 
+                  ? Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        const Text('Saving...'),
+                      ],
+                    )
+                  : const Text('Save'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  // Helper method to create placeholder chips
+  Widget _placeholderChip(String placeholder, TextEditingController controller) {
+    return ActionChip(
+      label: Text(placeholder),
+      onPressed: () {
+        // Insert placeholder at current cursor position
+        final text = controller.text;
+        final selection = controller.selection;
+        final newText = text.replaceRange(selection.start, selection.end, placeholder);
+        controller.text = newText;
+        controller.selection = TextSelection.collapsed(
+          offset: selection.start + placeholder.length,
+        );
+      },
+    );
+  }
+
+  // Show filter dialog
+  void _showFilterDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: const Text('Filter Invitees'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('WhatsApp Status', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ChoiceChip(
+                        label: const Text('All'),
+                        selected: _filterWhatsappStatus == null,
+                        onSelected: (selected) {
+                          if (selected) {
+                            setDialogState(() => _filterWhatsappStatus = null);
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ChoiceChip(
+                        label: const Text('Has WhatsApp'),
+                        selected: _filterWhatsappStatus == true,
+                        onSelected: (selected) {
+                          if (selected) {
+                            setDialogState(() => _filterWhatsappStatus = true);
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ChoiceChip(
+                        label: const Text('No WhatsApp'),
+                        selected: _filterWhatsappStatus == false,
+                        onSelected: (selected) {
+                          if (selected) {
+                            setDialogState(() => _filterWhatsappStatus = false);
+                          }
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                const Text('Invitation Status', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ChoiceChip(
+                        label: const Text('All'),
+                        selected: _filterInvitationSent == null,
+                        onSelected: (selected) {
+                          if (selected) {
+                            setDialogState(() => _filterInvitationSent = null);
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ChoiceChip(
+                        label: const Text('Sent'),
+                        selected: _filterInvitationSent == true,
+                        onSelected: (selected) {
+                          if (selected) {
+                            setDialogState(() => _filterInvitationSent = true);
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ChoiceChip(
+                        label: const Text('Not Sent'),
+                        selected: _filterInvitationSent == false,
+                        onSelected: (selected) {
+                          if (selected) {
+                            setDialogState(() => _filterInvitationSent = false);
+                          }
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                const Text('Attendance Status', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ChoiceChip(
+                        label: const Text('All'),
+                        selected: _filterAttendanceStatus == null,
+                        onSelected: (selected) {
+                          if (selected) {
+                            setDialogState(() => _filterAttendanceStatus = null);
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ChoiceChip(
+                        label: const Text('Attending'),
+                        selected: _filterAttendanceStatus == 'attending',
+                        onSelected: (selected) {
+                          if (selected) {
+                            setDialogState(() => _filterAttendanceStatus = 'attending');
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ChoiceChip(
+                        label: const Text('Not Attending'),
+                        selected: _filterAttendanceStatus == 'not_attending',
+                        onSelected: (selected) {
+                          if (selected) {
+                            setDialogState(() => _filterAttendanceStatus = 'not_attending');
+                          }
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ChoiceChip(
+                        label: const Text('Pending'),
+                        selected: _filterAttendanceStatus == 'pending',
+                        onSelected: (selected) {
+                          if (selected) {
+                            setDialogState(() => _filterAttendanceStatus = 'pending');
+                          }
+                        },
+                      ),
+                    ),
+                    const Expanded(child: SizedBox()),
+                    const Expanded(child: SizedBox()),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                const Text('Card Redemption Status', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ChoiceChip(
+                        label: const Text('All'),
+                        selected: _filterCardRedeemed == null,
+                        onSelected: (selected) {
+                          if (selected) {
+                            setDialogState(() => _filterCardRedeemed = null);
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ChoiceChip(
+                        label: const Text('Redeemed'),
+                        selected: _filterCardRedeemed == true,
+                        onSelected: (selected) {
+                          if (selected) {
+                            setDialogState(() => _filterCardRedeemed = true);
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ChoiceChip(
+                        label: const Text('Not Redeemed'),
+                        selected: _filterCardRedeemed == false,
+                        onSelected: (selected) {
+                          if (selected) {
+                            setDialogState(() => _filterCardRedeemed = false);
+                          }
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                const Text('Seen Status', style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ChoiceChip(
+                        label: const Text('All'),
+                        selected: _filterSeenStatus == null,
+                        onSelected: (selected) {
+                          if (selected) {
+                            setDialogState(() => _filterSeenStatus = null);
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ChoiceChip(
+                        label: const Text('Seen'),
+                        selected: _filterSeenStatus == true,
+                        onSelected: (selected) {
+                          if (selected) {
+                            setDialogState(() => _filterSeenStatus = true);
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ChoiceChip(
+                        label: const Text('Not Seen'),
+                        selected: _filterSeenStatus == false,
+                        onSelected: (selected) {
+                          if (selected) {
+                            setDialogState(() => _filterSeenStatus = false);
+                          }
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                },
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () {
+                  // Cancel any pending search timer
+                  _searchDebounceTimer?.cancel();
+
+                  setState(() {
+                    _isFilterActive = _filterWhatsappStatus != null || _filterInvitationSent != null || _filterAttendanceStatus != null || _filterCardRedeemed != null || _filterSeenStatus != null;
+                  });
+                  _applyFilters();
+                  Navigator.pop(context);
+                },
+                child: const Text('Apply'),
+              ),
+              if (_isFilterActive)
+                TextButton(
+                  onPressed: () {
+                    setDialogState(() {
+                      _filterWhatsappStatus = null;
+                      _filterInvitationSent = null;
+                      _filterAttendanceStatus = null;
+                      _filterCardRedeemed = null;
+                      _filterSeenStatus = null;
+                    });
+                    // Cancel any pending search timer
+                    _searchDebounceTimer?.cancel();
+
+                    setState(() {
+                      _isFilterActive = false;
+                    });
+                    _applyFilters();
+                    Navigator.pop(context);
+                  },
+                  child: const Text('Clear All'),
+                ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -254,57 +1249,266 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
         foregroundColor: Theme.of(context).appBarTheme.foregroundColor,
         actions: isBulkMode
             ? [
-          PopupMenuButton<String>(
-            onSelected: _handleBulkAction,
-            icon: const Icon(Icons.more_vert),
-            itemBuilder: (context) => [
-              const PopupMenuItem(value: 'send', child: Text('Send Invitations')),
-              const PopupMenuItem(value: 'preview', child: Text('Preview Cards')),
-              const PopupMenuItem(value: 'delete', child: Text('Delete')),
-            ],
-          ),
-          IconButton(
-            icon: const Icon(Icons.close),
-            onPressed: () {
-              setState(() {
-                isBulkMode = false;
-                selectedInviteeIds.clear();
-              });
-            },
-          ),
-        ]
+                PopupMenuButton<String>(
+                  onSelected: _handleBulkAction,
+                  icon: const Icon(Icons.more_vert),
+                  itemBuilder: (context) => [
+                    const PopupMenuItem(value: 'send', child: Text('Send Invitations')),
+                    const PopupMenuItem(value: 'send_download_card', child: Text('Send Download Card Msg')),
+                    const PopupMenuItem(value: 'mark_seen', child: Text('Mark as Seen')),
+                    const PopupMenuItem(value: 'preview', child: Text('Preview Cards')),
+                    const PopupMenuItem(value: 'delete', child: Text('Delete')),
+                  ],
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () {
+                    setState(() {
+                      isBulkMode = false;
+                      selectedInviteeIds.clear();
+                    });
+                  },
+                ),
+              ]
             : null,
       ),
 
       body: Column(
         children: [
-          Padding(
+          Container(
             padding: const EdgeInsets.all(16.0),
-            child: Row(
+            child: Column(
               children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: _showAddInviteeDialog,
-                    icon: const Icon(Icons.add),
-                    label: const Text('Add Invitee'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: _importFromExcel,
-                    icon: const Icon(Icons.upload_file),
-                    label: const Text('Import Excel'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: secondaryColor,
+                // Action buttons row with more compact layout
+                Row(
+                  children: [
+                    // Action buttons in a more compact layout
+                    Expanded(
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: [
+                            _actionButton(
+                              Icons.add, 
+                              'Add Invitee', 
+                              _showAddInviteeDialog
+                            ),
+                            const SizedBox(width: 24),
+                            _actionButton(
+                              Icons.upload_file, 
+                              'Import Excel', 
+                              _importFromExcel
+                            ),
+                            const SizedBox(width: 24),
+                            _actionButton(
+                              Icons.filter_list, 
+                              _isFilterActive ? 'Filters Active' : 'Filter', 
+                              _showFilterDialog,
+                              isActive: _isFilterActive,
+                            ),
+                            const SizedBox(width: 24),
+                            _actionButton(
+                              Icons.message_outlined,
+                              'Manage Templates',
+                              _showTemplateOptions,
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
-                  ),
+                  ],
                 ),
+
+                // Show active filters if any
+                if (_isFilterActive)
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Show result count
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Padding(
+                          padding: const EdgeInsets.only(top: 8.0, bottom: 4.0),
+                          child: Text(
+                            'Found ${totalFilteredInvitees} ${totalFilteredInvitees == 1 ? 'invitee' : 'invitees'}',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Theme.of(context).primaryColor,
+                            ),
+                          ),
+                        ),
+                      ),
+                      // Filter chips
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Padding(
+                          padding: const EdgeInsets.only(top: 4.0),
+                          child: Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            alignment: WrapAlignment.start,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            //const Text('Active filters:', style: TextStyle(fontWeight: FontWeight.bold)),
+                            if (_filterWhatsappStatus != null)
+                              Chip(
+                                label: Text(_filterWhatsappStatus! ? 'Has WhatsApp' : 'No WhatsApp'),
+                                onDeleted: () {
+                                  // Cancel any pending search timer
+                                  _searchDebounceTimer?.cancel();
+
+                                  setState(() {
+                                    _filterWhatsappStatus = null;
+                                    _isFilterActive = _filterWhatsappStatus != null || _filterInvitationSent != null || _filterAttendanceStatus != null || _filterCardRedeemed != null || _filterSeenStatus != null;
+                                  });
+                                  _applyFilters();
+                                },
+                              ),
+                            if (_filterInvitationSent != null)
+                              Chip(
+                                label: Text(_filterInvitationSent! ? 'Invitation Sent' : 'Not Sent'),
+                                onDeleted: () {
+                                  // Cancel any pending search timer
+                                  _searchDebounceTimer?.cancel();
+
+                                  setState(() {
+                                    _filterInvitationSent = null;
+                                    _isFilterActive = _filterWhatsappStatus != null || _filterInvitationSent != null || _filterAttendanceStatus != null || _filterCardRedeemed != null || _filterSeenStatus != null;
+                                  });
+                                  _applyFilters();
+                                },
+                              ),
+                            if (_filterAttendanceStatus != null)
+                              Chip(
+                                label: Text(_filterAttendanceStatus == 'attending' 
+                                    ? 'Attending' 
+                                    : _filterAttendanceStatus == 'not_attending' 
+                                        ? 'Not Attending' 
+                                        : 'Pending'),
+                                onDeleted: () {
+                                  // Cancel any pending search timer
+                                  _searchDebounceTimer?.cancel();
+
+                                  setState(() {
+                                    _filterAttendanceStatus = null;
+                                    _isFilterActive = _filterWhatsappStatus != null || _filterInvitationSent != null || _filterAttendanceStatus != null || _filterCardRedeemed != null || _filterSeenStatus != null;
+                                  });
+                                  _applyFilters();
+                                },
+                              ),
+                            if (_filterCardRedeemed != null)
+                              Chip(
+                                label: Text(_filterCardRedeemed! ? 'Card Redeemed' : 'Card Not Redeemed'),
+                                onDeleted: () {
+                                  // Cancel any pending search timer
+                                  _searchDebounceTimer?.cancel();
+
+                                  setState(() {
+                                    _filterCardRedeemed = null;
+                                    _isFilterActive = _filterWhatsappStatus != null || _filterInvitationSent != null || _filterAttendanceStatus != null || _filterCardRedeemed != null || _filterSeenStatus != null;
+                                  });
+                                  _applyFilters();
+                                },
+                              ),
+                            if (_filterSeenStatus != null)
+                              Chip(
+                                label: Text(_filterSeenStatus! ? 'Seen' : 'Not Seen'),
+                                onDeleted: () {
+                                  // Cancel any pending search timer
+                                  _searchDebounceTimer?.cancel();
+
+                                  setState(() {
+                                    _filterSeenStatus = null;
+                                    _isFilterActive = _filterWhatsappStatus != null || _filterInvitationSent != null || _filterAttendanceStatus != null || _filterCardRedeemed != null || _filterSeenStatus != null;
+                                  });
+                                  _applyFilters();
+                                },
+                              ),
+                            TextButton(
+                              onPressed: () {
+                                // Cancel any pending search timer
+                                _searchDebounceTimer?.cancel();
+
+                                setState(() {
+                                  _filterWhatsappStatus = null;
+                                  _filterInvitationSent = null;
+                                  _filterAttendanceStatus = null;
+                                  _filterCardRedeemed = null;
+                                  _filterSeenStatus = null;
+                                  _isFilterActive = false;
+                                });
+                                _applyFilters();
+                              },
+                              child: const Text('Clear All'),
+                            ),
+                          ],
+                        ),
+                      ),
+                      ),
+                    ],
+                  ),
               ],
             ),
           ),
+
+          // Search input field
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                hintText: 'Search by name...',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _searchQuery.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear),
+                      onPressed: () {
+                        // Cancel any pending search timer
+                        _searchDebounceTimer?.cancel();
+
+                        setState(() {
+                          _searchController.clear();
+                          _searchQuery = '';
+                        });
+
+                        // Apply filters immediately when clearing search
+                        _applyFilters(); // Reset search and apply filters
+                      },
+                    )
+                  : null,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8.0),
+                  borderSide: BorderSide(color: Colors.grey[300]!),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8.0),
+                  borderSide: BorderSide(color: Colors.grey[300]!),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8.0),
+                  borderSide: BorderSide(color: Theme.of(context).primaryColor),
+                ),
+                filled: true,
+                fillColor: Colors.white,
+                contentPadding: const EdgeInsets.symmetric(vertical: 12.0),
+              ),
+              onChanged: (value) {
+                setState(() {
+                  _searchQuery = value;
+                });
+
+                // Cancel any previous timer
+                _searchDebounceTimer?.cancel();
+
+                // Set a new timer to delay the API call
+                _searchDebounceTimer = Timer(const Duration(milliseconds: 500), () {
+                  _applyFilters(); // This will apply both filters and search
+                });
+              },
+            ),
+          ),
           Expanded(
-            child: invitees.isEmpty && !isLoading
+            child: (_isFilterActive || _searchQuery.isNotEmpty ? filteredInvitees : invitees).isEmpty && !isLoading
                 ? Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -316,40 +1520,71 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
                         ),
                         const SizedBox(height: 16),
                         Text(
-                          'No invitees found',
+                          _isFilterActive 
+                              ? 'No invitees match the current filters'
+                              : 'No invitees found',
                           style: Theme.of(context).textTheme.titleLarge?.copyWith(
                                 color: Colors.grey[700],
                               ),
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          'Click the button below to add a new invitee',
+                          _isFilterActive
+                              ? 'Try changing or clearing your filters'
+                              : 'Click the button below to add a new invitee',
                           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                                 color: Colors.grey[600],
                               ),
                           textAlign: TextAlign.center,
                         ),
                         const SizedBox(height: 24),
-                        ElevatedButton.icon(
-                          onPressed: _showAddInviteeDialog,
-                          icon: const Icon(Icons.add),
-                          label: const Text('Add Invitee'),
-                          style: ElevatedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 24,
-                              vertical: 12,
+                        if (_isFilterActive)
+                          ElevatedButton.icon(
+                            onPressed: () {
+                              // Cancel any pending search timer
+                              _searchDebounceTimer?.cancel();
+
+                              setState(() {
+                                _filterWhatsappStatus = null;
+                                _filterInvitationSent = null;
+                                _filterAttendanceStatus = null;
+                                _filterCardRedeemed = null;
+                                _filterSeenStatus = null;
+                                _isFilterActive = false;
+                              });
+                              _applyFilters();
+                            },
+                            icon: const Icon(Icons.filter_list_off),
+                            label: const Text('Clear Filters'),
+                            style: ElevatedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 24,
+                                vertical: 12,
+                              ),
+                            ),
+                          )
+                        else
+                          ElevatedButton.icon(
+                            onPressed: _showAddInviteeDialog,
+                            icon: const Icon(Icons.add),
+                            label: const Text('Add Invitee'),
+                            style: ElevatedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 24,
+                                vertical: 12,
+                              ),
                             ),
                           ),
-                        ),
                       ],
                     ),
                   )
                 : ListView.builder(
                     controller: _scrollController,
-                    itemCount: invitees.length + (isLoading ? 1 : 0),
+                    itemCount: (_isFilterActive || _searchQuery.isNotEmpty ? filteredInvitees : invitees).length + (isLoading ? 1 : 0),
                     itemBuilder: (context, index) {
-                      if (index < invitees.length) {
-                        return _buildInviteeCard(invitees[index]);
+                      final displayList = _isFilterActive || _searchQuery.isNotEmpty ? filteredInvitees : invitees;
+                      if (index < displayList.length) {
+                        return _buildInviteeCard(displayList[index]);
                       }
                       return const Padding(
                         padding: EdgeInsets.all(16.0),
@@ -363,7 +1598,7 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
     );
   }
 
-  void _handleBulkAction(String action) {
+  void _handleBulkAction(String action) async {
     final List<Map<String, dynamic>> selectedInvitees = invitees
         .where((invitee) => selectedInviteeIds.contains(invitee['id']))
         .cast<Map<String, dynamic>>()
@@ -371,9 +1606,36 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
 
     switch (action) {
       case 'send':
+        // Show loading indicator
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Sending invitations to ${selectedInvitees.length} invitees')),
+          SnackBar(content: Text('Sending invitations to ${selectedInvitees.length} invitees...')),
         );
+
+        try {
+          // Extract invitee IDs
+          final List<int> inviteeIds = selectedInvitees
+              .map<int>((invitee) => invitee['id'] as int)
+              .toList();
+
+          // Call the API to send bulk invitations
+          await ApiService.bulkSendInvitations(
+            eventId: widget.eventId,
+            inviteeIds: inviteeIds,
+          );
+
+          // Show success message
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Successfully sent invitations to ${selectedInvitees.length} invitees')),
+          );
+        } catch (e) {
+          // Show error message
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to send invitations: ${e.toString()}'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
         break;
       case 'preview':
         ScaffoldMessenger.of(context).showSnackBar(
@@ -382,6 +1644,94 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
         break;
       case 'delete':
         _confirmBulkDelete(selectedInvitees);
+        break;
+      case 'send_download_card':
+        // Check if download card template exists
+        if (_templates['download_card'] == null || _templates['download_card']['download_card_message'] == null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No download card message template found. Please create one first.')),
+          );
+          return;
+        }
+
+        // Show loading indicator
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Sending download card messages to ${selectedInvitees.length} invitees...')),
+        );
+
+        try {
+          // Extract invitee IDs
+          final List<int> inviteeIds = selectedInvitees
+              .map<int>((invitee) => invitee['id'] as int)
+              .toList();
+
+          // Call the API to send bulk download card messages
+          final result = await ApiService.sendBulkDownloadCardMessages(
+            eventId: widget.eventId,
+            inviteeIds: inviteeIds,
+          );
+
+          // Show success message
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Successfully sent download card messages to ${result['success_count']} invitees')),
+          );
+        } catch (e) {
+          // Show error message
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to send download card messages: ${e.toString()}'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        break;
+      case 'mark_seen':
+        // Show loading indicator
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Marking ${selectedInvitees.length} invitees as seen...')),
+        );
+
+        try {
+          // Extract invitee IDs
+          final List<int> inviteeIds = selectedInvitees
+              .map<int>((invitee) => invitee['id'] as int)
+              .toList();
+
+          // Call the API to mark invitees as seen in bulk
+          final result = await ApiService.markBulkInviteesSeen(
+            eventId: widget.eventId,
+            inviteeIds: inviteeIds,
+          );
+
+          // Update the invitees in the lists
+          setState(() {
+            // Update the invitees in both lists
+            for (final invitee in invitees) {
+              if (inviteeIds.contains(invitee['id'])) {
+                invitee['is_seen'] = true;
+              }
+            }
+
+            for (final invitee in filteredInvitees) {
+              if (inviteeIds.contains(invitee['id'])) {
+                invitee['is_seen'] = true;
+              }
+            }
+          });
+
+          // Show success message
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Successfully marked ${result['updated_count']} invitees as seen')),
+          );
+        } catch (e) {
+          // Show error message
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to mark invitees as seen: ${e.toString()}'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
         break;
     }
 
@@ -567,15 +1917,460 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
     _isOnWhatsapp = false;
   }
 
-  void _importFromExcel() {
-    // Dummy action for now
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Excel import functionality coming soon')),
+  // Generate and save a sample file (CSV or Excel)
+  Future<void> _downloadSampleFile({bool asExcel = false}) async {
+    try {
+      // Request storage permission
+      final permissionStatus = await _requestStoragePermission();
+      if (!permissionStatus.isGranted) {
+        if (permissionStatus.isPermanentlyDenied) {
+          // Show dialog to guide user to app settings
+          final goToSettings = await _showPermissionSettingsDialog(
+            'Storage Permission Required',
+            'To save the sample file, this app needs storage permission. Please enable it in app settings.'
+          );
+
+          if (goToSettings) {
+            await openAppSettings();
+          }
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Storage permission is required to save the sample file')),
+          );
+        }
+        return;
+      }
+
+      // Get download directory
+      final directory = await getApplicationDocumentsDirectory();
+      final fileType = asExcel ? 'Excel' : 'CSV';
+      final extension = asExcel ? 'xlsx' : 'csv';
+
+      // Show loading indicator
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Generating sample $fileType file...')),
+      );
+
+      final fileName = 'invitees_sample_${DateTime.now().millisecondsSinceEpoch}.$extension';
+      final filePath = '${directory.path}/$fileName';
+
+      if (asExcel) {
+        // Create Excel file
+        final excel = Excel.createExcel();
+        final sheet = excel.sheets.values.first;
+
+        // Add header row
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 0)).value = 'Name';
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: 0)).value = 'Phone Number';
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: 0)).value = 'Number of Invitees';
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: 0)).value = 'Is on WhatsApp';
+
+        // Add sample data
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 1)).value = 'John Doe';
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: 1)).value = '+1234567890';
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: 1)).value = 2;
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: 1)).value = 'Yes';
+
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 2)).value = 'Jane Smith';
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: 2)).value = '+0987654321';
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: 2)).value = 1;
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: 2)).value = 'No';
+
+        // Save Excel file
+        final excelBytes = excel.encode();
+        if (excelBytes != null) {
+          final file = File(filePath);
+          await file.writeAsBytes(excelBytes);
+        } else {
+          throw Exception('Failed to encode Excel file');
+        }
+      } else {
+        // Create CSV content with header and sample rows
+        final csvContent = 'Name,Phone Number,Number of Invitees,Is on WhatsApp\n'
+            'John Doe,+1234567890,2,Yes\n'
+            'Jane Smith,+0987654321,1,No';
+
+        // Write to file
+        final file = File(filePath);
+        await file.writeAsString(csvContent);
+      }
+
+      // Save to gallery or share based on platform
+      if (Platform.isAndroid || Platform.isIOS) {
+        // For mobile, share the file
+        await Share.shareXFiles(
+          [XFile(filePath)],
+          text: 'Sample $fileType file for invitees',
+        );
+      } else {
+        // For desktop, just show success message with file path
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Sample $fileType saved to: $filePath')),
+        );
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error creating sample file: $e')),
+      );
+    }
+  }
+
+  Future<void> _importFromExcel() async {
+    try {
+      // Show loading indicator
+      setState(() {
+        isLoading = true;
+      });
+
+      // Show file selection dialog
+      final result = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Select File'),
+          content: const Text(
+            'Please select a CSV or Excel file containing invitee data.\n\n'
+            'The file should have columns for:\n'
+            '- Name\n'
+            '- Phone Number\n'
+            '- Number of Invitees\n'
+            '- Is on WhatsApp (Yes/No)\n\n'
+            'Both CSV (.csv) and Excel (.xlsx) files are supported.'
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context, false);
+                _downloadSampleFile(asExcel: false);
+              },
+              child: const Text('Download CSV Sample'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context, false);
+                _downloadSampleFile(asExcel: true);
+              },
+              child: const Text('Download Excel Sample'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Select File'),
+            ),
+          ],
+        ),
+      );
+
+      if (result != true) {
+        setState(() {
+          isLoading = false;
+        });
+        return;
+      }
+
+      // Use FilePicker instead of ImagePicker for document files
+      final result2 = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['csv', 'xlsx'],
+      );
+
+      if (result2 == null || result2.files.isEmpty) {
+        setState(() {
+          isLoading = false;
+        });
+        return;
+      }
+
+      // Get file path
+      final file = File(result2.files.first.path!);
+      final fileName = file.path.split('/').last;
+
+      // Check file extension
+      final extension = fileName.split('.').last.toLowerCase();
+      if (extension != 'csv' && extension != 'xlsx') {
+        setState(() {
+          isLoading = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please select a CSV or Excel file'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      // Show parsing message
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Parsing $fileName...')),
+      );
+
+      // Parse file locally
+      List<Map<String, dynamic>> parsedInvitees = [];
+
+      if (extension == 'csv') {
+        // Parse CSV file
+        final contents = await file.readAsString();
+        final lines = contents.split('\n');
+
+        // Skip header row if present
+        bool hasHeader = true;
+        int startIndex = hasHeader ? 1 : 0;
+
+        for (int i = startIndex; i < lines.length; i++) {
+          final line = lines[i].trim();
+          if (line.isEmpty) continue;
+
+          final values = line.split(',');
+          if (values.length < 3) continue; // Skip invalid rows
+
+          final name = values[0].trim();
+          final phoneNumber = values[1].trim();
+          final numberOfInvitees = int.tryParse(values[2].trim()) ?? 1;
+          final isOnWhatsapp = values.length > 3 ? 
+              values[3].trim().toLowerCase() == 'yes' || values[3].trim() == '1' : false;
+
+          parsedInvitees.add({
+            'name': name,
+            'phone_number': phoneNumber,
+            'number_of_invitees': numberOfInvitees,
+            'is_on_whatsapp': isOnWhatsapp,
+          });
+        }
+      } else if (extension == 'xlsx') {
+        // Parse Excel file
+        final bytes = await file.readAsBytes();
+        final excel = Excel.decodeBytes(bytes);
+
+        // Get the first sheet
+        final sheet = excel.tables.keys.first;
+        final rows = excel.tables[sheet]?.rows;
+
+        if (rows != null && rows.isNotEmpty) {
+          // Skip header row
+          for (int i = 1; i < rows.length; i++) {
+            final row = rows[i];
+            if (row.isEmpty) continue;
+
+            // No need to check row length here as we're checking individually for each cell
+
+            // Extract values from cells
+            String name = '';
+            if (row.length > 0 && row[0] != null && row[0]!.value != null) {
+              name = row[0]!.value.toString().trim();
+            }
+
+            String phoneNumber = '';
+            if (row.length > 1 && row[1] != null && row[1]!.value != null) {
+              phoneNumber = row[1]!.value.toString().trim();
+            }
+
+            int numberOfInvitees = 1;
+            if (row.length > 2 && row[2] != null && row[2]!.value != null) {
+              final value = row[2]!.value.toString().trim();
+              numberOfInvitees = int.tryParse(value) ?? 1;
+            }
+
+            // Check for WhatsApp status in 4th column if it exists
+            bool isOnWhatsapp = false;
+            if (row.length > 3 && row[3] != null) {
+              final cellValue = row[3]!.value;
+              if (cellValue != null) {
+                final whatsappStatus = cellValue.toString().trim().toLowerCase();
+                isOnWhatsapp = whatsappStatus == 'yes' || whatsappStatus == '1' || whatsappStatus == 'true';
+              }
+            }
+
+            // Skip empty rows
+            if (name.isEmpty && phoneNumber.isEmpty) continue;
+
+            parsedInvitees.add({
+              'name': name,
+              'phone_number': phoneNumber,
+              'number_of_invitees': numberOfInvitees,
+              'is_on_whatsapp': isOnWhatsapp,
+            });
+          }
+        }
+      }
+
+      // Hide loading indicator
+      setState(() {
+        isLoading = false;
+      });
+
+      if (parsedInvitees.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No valid invitee data found in the file'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      // Show preview dialog with parsed data
+      final confirmed = await _showInviteesPreviewDialog(parsedInvitees);
+
+      if (confirmed != true) {
+        return;
+      }
+
+      // Show loading indicator for API call
+      setState(() {
+        isLoading = true;
+      });
+
+      // Send parsed data to API
+      int successCount = 0;
+      List<String> errors = [];
+
+      // Process invitees in batches to avoid overwhelming the API
+      for (final invitee in parsedInvitees) {
+        try {
+          await ApiService.addInvitee(
+            eventId: widget.eventId,
+            name: invitee['name'],
+            phoneNumber: invitee['phone_number'],
+            numberOfInvitees: invitee['number_of_invitees'],
+            isOnWhatsapp: invitee['is_on_whatsapp'],
+          );
+          successCount++;
+        } catch (e) {
+          errors.add('${invitee['name']} (${invitee['phone_number']}): ${e.toString()}');
+        }
+      }
+
+      // Reset invitees list and fetch first page
+      setState(() {
+        invitees = [];
+        currentPage = 1;
+        isLoading = false;
+      });
+
+      await fetchInvitees();
+
+      // Show success/error message
+      if (errors.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Successfully imported $successCount invitees')),
+        );
+      } else {
+        // Show error dialog with details
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: Text('Import Completed with Errors'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Successfully imported: $successCount'),
+                  Text('Failed: ${errors.length}'),
+                  const SizedBox(height: 16),
+                  if (errors.isNotEmpty) ...[
+                    const Text('Errors:', style: TextStyle(fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    ...errors.take(5).map((e) => Text('• $e')),
+                    if (errors.length > 5)
+                      Text('... and ${errors.length - 5} more errors'),
+                  ],
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+      }
+    } catch (e) {
+      setState(() {
+        isLoading = false;
+      });
+
+      // Show error message
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error importing invitees: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  // Show preview dialog with parsed invitee data
+  Future<bool?> _showInviteesPreviewDialog(List<Map<String, dynamic>> invitees) async {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Preview Invitees'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Found ${invitees.length} invitees in the file.'),
+              const SizedBox(height: 16),
+              Flexible(
+                child: Container(
+                  constraints: BoxConstraints(
+                    maxHeight: MediaQuery.of(context).size.height * 0.5,
+                  ),
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: invitees.length > 10 ? 10 : invitees.length,
+                    itemBuilder: (context, index) {
+                      final invitee = invitees[index];
+                      return ListTile(
+                        title: Text(invitee['name']),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Phone: ${invitee['phone_number']}'),
+                            Text(
+                              'Invitees: ${invitee['number_of_invitees']} | WhatsApp: ${invitee['is_on_whatsapp'] ? 'Yes' : 'No'}',
+                            ),
+                          ],
+                        ),
+                        dense: true,
+                      );
+                    },
+                  ),
+                ),
+              ),
+              if (invitees.length > 10)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8.0),
+                  child: Text('... and ${invitees.length - 10} more'),
+                ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Import'),
+          ),
+        ],
+      ),
     );
   }
 
   void _showPreviewDialog(String slug) {
-    final url = 'https://events.ajiriwa.net/invitation-card/$slug';
+    print(slug);
+    final url = 'https://events.ajiriwa.net/invitation-card/image/$slug';
 
     showDialog(
       context: context,
@@ -657,14 +2452,58 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
     );
   }
 
+  // Helper method to show a dialog guiding users to app settings
+  Future<bool> _showPermissionSettingsDialog(String title, String message) async {
+    return await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(message),
+            const SizedBox(height: 16),
+            const Text(
+              'You can enable permissions in:\nSettings > Apps > AJ Events > Permissions',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Open Settings'),
+          ),
+        ],
+      ),
+    ) ?? false;
+  }
+
   Future<void> _downloadImage(String url) async {
     try {
       // Request storage/photos permission based on platform
       final permissionStatus = await _requestStoragePermission();
       if (!permissionStatus.isGranted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Storage permission is required to save the image')),
-        );
+        if (permissionStatus.isPermanentlyDenied) {
+          // Show dialog to guide user to app settings
+          final goToSettings = await _showPermissionSettingsDialog(
+            'Storage Permission Required',
+            'To save images, this app needs storage permission. Please enable it in app settings.'
+          );
+
+          if (goToSettings) {
+            await openAppSettings();
+          }
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Storage permission is required to save the image')),
+          );
+        }
         return;
       }
 
@@ -708,24 +2547,43 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
 
   Future<void> _shareImage(String url) async {
     try {
+      // Show loading indicator
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Preparing to share image...')),
+      );
+
       // Request storage permission for temporary file access
       final permissionStatus = await _requestStoragePermission();
       if (!permissionStatus.isGranted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Storage permission is required to share the image')),
-        );
+        if (permissionStatus.isPermanentlyDenied) {
+          // Show dialog to guide user to app settings
+          final goToSettings = await _showPermissionSettingsDialog(
+            'Storage Permission Required',
+            'To share images, this app needs storage permission. Please enable it in app settings.'
+          );
+
+          if (goToSettings) {
+            await openAppSettings();
+          }
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Storage permission is required to share the image')),
+          );
+        }
         return;
       }
 
       // Configure Dio with timeout
       final dio = Dio();
-      dio.options.connectTimeout = const Duration(seconds: 10);
-      dio.options.receiveTimeout = const Duration(seconds: 10);
+      dio.options.connectTimeout = const Duration(seconds: 15);
+      dio.options.receiveTimeout = const Duration(seconds: 15);
 
       // Download image to temporary directory
       final dir = await getTemporaryDirectory();
-      final filename = 'invite_share_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final filename = 'invitation_${DateTime.now().millisecondsSinceEpoch}.jpg';
       final filePath = '${dir.path}/$filename';
+
+      debugPrint('Downloading image to: $filePath');
 
       final response = await dio.download(
         url,
@@ -737,10 +2595,19 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
         throw Exception('Failed to download image: Status ${response.statusCode}');
       }
 
+      // Verify file exists
+      final file = File(filePath);
+      if (!await file.exists()) {
+        throw Exception('Downloaded file does not exist at path: $filePath');
+      }
+
+      debugPrint('File downloaded successfully. Size: ${await file.length()} bytes');
+
       // Share the file
       await Share.shareXFiles(
         [XFile(filePath)],
         text: 'Check out this invitation!',
+        subject: 'Event Invitation',
       );
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -758,20 +2625,75 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
   Future<PermissionStatus> _requestStoragePermission() async {
     // Handle permissions based on platform and Android version
     if (Platform.isAndroid) {
-      // For Android 13+, request photos permission
-      if (await Permission.photos.isDenied) {
-        return await Permission.photos.request();
+      // For Android 13+ (API level 33+), request media permissions
+      if (await Permission.photos.status != PermissionStatus.granted) {
+        final photosStatus = await Permission.photos.request();
+        debugPrint('Photos permission status: $photosStatus');
+
+        // If photos permission is granted, we can return early
+        if (photosStatus.isGranted) {
+          return PermissionStatus.granted;
+        }
+      } else {
+        // Photos permission is already granted
+        return PermissionStatus.granted;
       }
-      // For older Android versions, request storage permission
-      if (await Permission.storage.isDenied) {
-        return await Permission.storage.request();
+
+      // For Android 10-12, request storage permission if photos permission was denied
+      if (await Permission.storage.status != PermissionStatus.granted) {
+        final storageStatus = await Permission.storage.request();
+        debugPrint('Storage permission status: $storageStatus');
+
+        // If storage permission is granted, we can return early
+        if (storageStatus.isGranted) {
+          return PermissionStatus.granted;
+        }
+      } else {
+        // Storage permission is already granted
+        return PermissionStatus.granted;
+      }
+
+      // For sharing functionality on Android 11+ (API level 30+), try manage external storage
+      // This is a special permission that requires the user to go to Settings
+      if (await Permission.manageExternalStorage.status != PermissionStatus.granted) {
+        final manageStatus = await Permission.manageExternalStorage.request();
+        debugPrint('Manage external storage permission status: $manageStatus');
+
+        // If manage external storage permission is granted, we can return early
+        if (manageStatus.isGranted) {
+          return PermissionStatus.granted;
+        }
+      } else {
+        // Manage external storage permission is already granted
+        return PermissionStatus.granted;
+      }
+
+      // Check if we have at least one permission granted
+      if (await Permission.photos.isGranted || 
+          await Permission.storage.isGranted || 
+          await Permission.manageExternalStorage.isGranted) {
+        return PermissionStatus.granted;
+      } else {
+        // If all permissions are permanently denied, show a dialog to guide the user to settings
+        if (await Permission.photos.isPermanentlyDenied ||
+            await Permission.storage.isPermanentlyDenied ||
+            await Permission.manageExternalStorage.isPermanentlyDenied) {
+          // This will be handled by the calling function
+          return PermissionStatus.permanentlyDenied;
+        }
+        return PermissionStatus.denied;
       }
     } else if (Platform.isIOS) {
       // iOS typically requires photos permission for gallery access
-      if (await Permission.photos.isDenied) {
-        return await Permission.photos.request();
+      if (await Permission.photos.status != PermissionStatus.granted) {
+        final photosStatus = await Permission.photos.request();
+        debugPrint('iOS Photos permission status: $photosStatus');
+        return photosStatus;
       }
+      return PermissionStatus.granted;
     }
+
+    // Default fallback
     return PermissionStatus.granted;
   }
 

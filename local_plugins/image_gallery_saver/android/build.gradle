@@ -32,6 +32,11 @@ android {
         minSdkVersion 21
         targetSdkVersion 35
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+
+        // Add support for 16 KB memory page sizes (required by Google by Nov 1, 2025)
+        ndk {
+            abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
+        }
     }
 
     compileOptions {

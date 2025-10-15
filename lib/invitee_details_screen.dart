@@ -156,7 +156,7 @@ class _InviteeDetailsScreenState extends State<InviteeDetailsScreen> {
           final inviteeCount = totalInvitees.toString();
 
           final initials = name.isNotEmpty
-              ? name.trim().split(' ').where((e) => e.isNotEmpty).map((e) => e[0]).take(2).join().toUpperCase()
+              ? name.trim().split(' ').where((String e) => e.isNotEmpty).map((String e) => e[0]).take(2).join().toUpperCase()
               : 'NA';
 
           return Padding(

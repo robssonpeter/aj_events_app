@@ -24,14 +24,14 @@ class MainLayout extends StatelessWidget {
         return Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(
+            /*ListTile(
               leading: const Icon(Icons.person),
               title: const Text('Profile'),
               onTap: () {
                 Navigator.pop(context);
                 // Navigate to profile screen
               },
-            ),
+            ),*/
             ListTile(
               leading: const Icon(Icons.logout),
               title: const Text('Logout'),

@@ -11,6 +11,7 @@ class CreateEventScreen extends StatefulWidget {
 
 class _CreateEventScreenState extends State<CreateEventScreen> {
   final _formKey = GlobalKey<FormState>();
+  final _dateController = TextEditingController();
 
   String title = '';
   String description = '';
@@ -20,6 +21,47 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
   String capacity = '';
 
   bool isSubmitting = false;
+
+  @override
+  void dispose() {
+    _dateController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _selectDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now(),
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2101),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: ColorScheme.light(
+              primary: primaryColor,
+              onPrimary: Colors.white,
+              onSurface: Colors.black,
+            ),
+            textButtonTheme: TextButtonThemeData(
+              style: TextButton.styleFrom(
+                foregroundColor: primaryColor,
+              ),
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (picked != null) {
+      // Format the date as YYYY-MM-DD for API
+      final formattedDate = "${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}";
+      setState(() {
+        date = formattedDate;
+        _dateController.text = formattedDate;
+      });
+    }
+  }
 
   Future<void> submitEvent() async {
     if (!_formKey.currentState!.validate()) return;
@@ -76,8 +118,36 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
 
               const SizedBox(height: 20),
               _sectionTitle('Date & Time'),
-              _buildTextField(label: 'Date (YYYY-MM-DD)', onSaved: (val) => date = val!),
-              _buildTextField(label: 'Time (HH:MM)', onSaved: (val) => time = val!),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: TextFormField(
+                  controller: _dateController,
+                  decoration: InputDecoration(
+                    labelText: 'Date',
+                    filled: true,
+                    fillColor: Colors.white,
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: Colors.grey.shade300),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: primaryColor, width: 2),
+                    ),
+                    suffixIcon: Icon(Icons.calendar_today, color: primaryColor),
+                  ),
+                  readOnly: true,
+                  onTap: () => _selectDate(context),
+                  validator: (value) => (value == null || value.trim().isEmpty) ? 'Please select a date' : null,
+                  onSaved: (val) => date = val!,
+                ),
+              ),
+              _buildTextField(
+                label: 'Time (HH:MM)', 
+                onSaved: (val) => time = val ?? '',
+                validator: (value) => null, // Time is optional
+              ),
 
               const SizedBox(height: 20),
               _sectionTitle('Location & Capacity'),
@@ -114,6 +184,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
     required FormFieldSetter<String> onSaved,
     TextInputType keyboardType = TextInputType.text,
     int maxLines = 1,
+    FormFieldValidator<String>? validator,
   }) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
@@ -135,7 +206,7 @@ class _CreateEventScreenState extends State<CreateEventScreen> {
         maxLines: maxLines,
         keyboardType: keyboardType,
         onSaved: onSaved,
-        validator: (value) => (value == null || value.trim().isEmpty) ? 'Required field' : null,
+        validator: validator ?? ((value) => (value == null || value.trim().isEmpty) ? 'Required field' : null),
       ),
     );
   }

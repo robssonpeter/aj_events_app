@@ -32,8 +32,11 @@ class _SearchInviteesScreenState extends State<SearchInviteesScreen> {
   }
 
   void _onSearchChanged(String query) {
+    // Cancel any previous debounce timer that might be running
     if (_debounce?.isActive ?? false) _debounce!.cancel();
 
+    // Set a new timer to delay the search operation by 300ms
+    // This prevents excessive API calls while the user is still typing
     _debounce = Timer(const Duration(milliseconds: 300), () {
       _searchInvitees(query);
     });
@@ -75,6 +78,7 @@ class _SearchInviteesScreenState extends State<SearchInviteesScreen> {
 
 
   Future<void> _refreshResults() async {
+    // For explicit refresh action, we bypass debounce
     await _searchInvitees(_searchController.text.trim());
   }
 
@@ -83,7 +87,7 @@ class _SearchInviteesScreenState extends State<SearchInviteesScreen> {
     final bgColor = isRedeemed ? Colors.green.shade400 : primaryColor;
     final name = invitee['name'] ?? '';
     final initials = name.isNotEmpty
-        ? name.trim().split(' ').where((e) => e.isNotEmpty).map((e) => e[0]).take(2).join().toUpperCase()
+        ? name.trim().split(' ').where((String e) => e.isNotEmpty).map((String e) => e[0]).take(2).join().toUpperCase()
         : 'NA';
 
     return Padding(
@@ -285,7 +289,8 @@ class _SearchInviteesScreenState extends State<SearchInviteesScreen> {
                   icon: const Icon(Icons.clear, color: Colors.grey),
                   onPressed: () {
                     _searchController.clear();
-                    setState(() => _searchResults.clear());
+                    // No need to manually clear results, the listener will trigger _onSearchChanged
+                    // which will handle it through the debounce mechanism
                   },
                 ),
                 contentPadding:
