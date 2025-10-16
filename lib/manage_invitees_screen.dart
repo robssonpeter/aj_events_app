@@ -2653,31 +2653,14 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
         return PermissionStatus.granted;
       }
 
-      // For sharing functionality on Android 11+ (API level 30+), try manage external storage
-      // This is a special permission that requires the user to go to Settings
-      if (await Permission.manageExternalStorage.status != PermissionStatus.granted) {
-        final manageStatus = await Permission.manageExternalStorage.request();
-        debugPrint('Manage external storage permission status: $manageStatus');
-
-        // If manage external storage permission is granted, we can return early
-        if (manageStatus.isGranted) {
-          return PermissionStatus.granted;
-        }
-      } else {
-        // Manage external storage permission is already granted
-        return PermissionStatus.granted;
-      }
-
       // Check if we have at least one permission granted
       if (await Permission.photos.isGranted || 
-          await Permission.storage.isGranted || 
-          await Permission.manageExternalStorage.isGranted) {
+          await Permission.storage.isGranted) {
         return PermissionStatus.granted;
       } else {
         // If all permissions are permanently denied, show a dialog to guide the user to settings
         if (await Permission.photos.isPermanentlyDenied ||
-            await Permission.storage.isPermanentlyDenied ||
-            await Permission.manageExternalStorage.isPermanentlyDenied) {
+            await Permission.storage.isPermanentlyDenied) {
           // This will be handled by the calling function
           return PermissionStatus.permanentlyDenied;
         }
