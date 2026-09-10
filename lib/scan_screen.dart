@@ -1,17 +1,13 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
-//import 'package:flutter_vibrate/flutter_vibrate.dart';
-//import 'package:vibration/vibration.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import 'common.dart';
 import 'invitee_details_screen.dart';
-import 'package:aj_events/theme.dart';
 
 class ScanScreen extends StatefulWidget {
   final int eventId;
 
-  const ScanScreen({Key? key, required this.eventId}) : super(key: key);
+  const ScanScreen({super.key, required this.eventId});
 
   @override
   State<ScanScreen> createState() => _ScanScreenState();
@@ -57,8 +53,7 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
       final code = barcodes.first.rawValue;
       if (code == null || code.isEmpty) return;
 
-      // Debug log
-      print("QR Code detected: $code");
+      debugPrint("QR Code detected: $code");
 
       setState(() => _isScanning = true);
 
@@ -93,7 +88,7 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
         scannerController.start();
       });
     } catch (e) {
-      print("Error in QR code scanning: $e");
+      debugPrint("Error in QR code scanning: $e");
       setState(() => _isScanning = false);
       scannerController.start(); // Restart scanner on error
     }
@@ -101,8 +96,7 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
 
   void _toggleFlash() async {
     await scannerController.toggleTorch();
-    bool torchState = scannerController.torchState.value == TorchState.on;
-    setState(() => _flashOn = torchState);
+    setState(() => _flashOn = !_flashOn);
   }
 
   @override
@@ -139,7 +133,7 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
               scannerBoxSize: scanBoxSize,
               borderColor: Colors.white,
               borderWidth: 2.0,
-              overlayColor: Colors.black.withOpacity(1.0),
+              overlayColor: Colors.black.withValues(alpha: 1.0),
             ),
           ),
 
@@ -153,7 +147,7 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
                 Text(
                   'Align QR Code within the box',
                   style: TextStyle(
-                    color: Colors.white.withOpacity(0.9),
+                    color: Colors.white.withValues(alpha: 0.9),
                     fontSize: 16,
                     fontWeight: FontWeight.w500,
                   ),
@@ -170,7 +164,7 @@ class _ScanScreenState extends State<ScanScreen> with SingleTickerProviderStateM
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: Colors.green.withOpacity(0.85),
+                  color: Colors.green.withValues(alpha: 0.85),
                 ),
                 child: const Icon(Icons.check, color: Colors.white, size: 48),
               ),

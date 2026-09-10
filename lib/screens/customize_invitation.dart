@@ -7,6 +7,8 @@ import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../theme.dart';
+import '../widgets/invitation_upload_card.dart';
+import '../widgets/invitation_selection_tools.dart';
 
 class CustomizeInvitationScreen extends StatefulWidget {
   final int eventId;
@@ -50,10 +52,10 @@ class _CustomizeInvitationScreenState extends State<CustomizeInvitationScreen> {
     super.didUpdateWidget(oldWidget);
     // If the event ID has changed, clear the current template and load the new one
     if (oldWidget.eventId != widget.eventId) {
-      print('Event ID changed from ${oldWidget.eventId} to ${widget.eventId}. Reloading template...');
+      debugPrint('Event ID changed from ${oldWidget.eventId} to ${widget.eventId}. Reloading template...');
 
       // Clear template data
-      print('Clearing template data');
+      debugPrint('Clearing template data');
       setState(() {
         _imageFile = null;
         _originalDimensions = null;
@@ -70,37 +72,37 @@ class _CustomizeInvitationScreenState extends State<CustomizeInvitationScreen> {
   }
 
   Future<void> _loadTemplate() async {
-    print('Loading template for event ID: ${widget.eventId}');
+    debugPrint('Loading template for event ID: ${widget.eventId}');
 
     if (widget.eventId > 0) {
       setState(() => _isLoading = true);
 
       try {
         final url = 'https://events.ajiriwa.net/api/templates/${widget.eventId}';
-        print('Fetching template from: $url');
+        debugPrint('Fetching template from: $url');
 
         final response = await http.get(Uri.parse(url));
 
         if (response.statusCode == 200) {
-          print('Template fetched successfully');
+          debugPrint('Template fetched successfully');
           final template = json.decode(response.body);
 
           final imagePath = 'https://events.ajiriwa.net/storage/${template['image_path']}';
-          print('Template image path: $imagePath');
+          debugPrint('Template image path: $imagePath');
 
           final tempDir = await getTemporaryDirectory();
           final tempFile = File('${tempDir.path}/template${widget.eventId}.jpg');
 
           // Check if file exists and delete it before writing new image
           if (await tempFile.exists()) {
-            print('Deleting existing cached template image...');
+            debugPrint('Deleting existing cached template image...');
             await tempFile.delete();
           }
 
-          print('Downloading template image...');
+          debugPrint('Downloading template image...');
           final imageResponse = await http.get(Uri.parse(imagePath));
           await tempFile.writeAsBytes(imageResponse.bodyBytes);
-          print('Template image downloaded to: ${tempFile.path}');
+          debugPrint('Template image downloaded to: ${tempFile.path}');
 
           setState(() {
             _imageFile = tempFile;
@@ -109,11 +111,11 @@ class _CustomizeInvitationScreenState extends State<CustomizeInvitationScreen> {
             selections = {'name': null, 'qrcode': null};
           });
 
-          print('Decoding image to get dimensions...');
+          debugPrint('Decoding image to get dimensions...');
           final decodedImage = img.decodeImage(imageResponse.bodyBytes);
 
           if (decodedImage != null) {
-            print('Image decoded successfully: ${decodedImage.width}x${decodedImage.height}');
+            debugPrint('Image decoded successfully: ${decodedImage.width}x${decodedImage.height}');
 
             setState(() {
               _originalDimensions = Size(
@@ -123,32 +125,32 @@ class _CustomizeInvitationScreenState extends State<CustomizeInvitationScreen> {
             });
 
             // Update display resolution after setting original dimensions
-            print('Updating display resolution...');
+            debugPrint('Updating display resolution...');
             _updateDisplayResolution();
 
             // Apply template selections after display resolution is updated
             if (_displayResolution != null) {
-              print('Applying template selections...');
+              debugPrint('Applying template selections...');
               setState(() {
                 if (template['name_selection'] != null) {
-                  print('Applying name selection: ${template['name_selection']}');
+                  debugPrint('Applying name selection: ${template['name_selection']}');
                   selections['name'] = _scaleRect(template['name_selection']);
-                  print('Scaled name selection: ${selections['name']}');
+                  debugPrint('Scaled name selection: ${selections['name']}');
                 }
 
                 if (template['qrcode_selection'] != null) {
-                  print('Applying QR code selection: ${template['qrcode_selection']}');
+                  debugPrint('Applying QR code selection: ${template['qrcode_selection']}');
                   selections['qrcode'] = _scaleRect(template['qrcode_selection']);
-                  print('Scaled QR code selection: ${selections['qrcode']}');
+                  debugPrint('Scaled QR code selection: ${selections['qrcode']}');
                 }
               });
 
-              print('Template loaded successfully with selections');
+              debugPrint('Template loaded successfully with selections');
             } else {
-              print('Warning: Display resolution is null, cannot scale selections');
+              debugPrint('Warning: Display resolution is null, cannot scale selections');
             }
           } else {
-            print('Error: Failed to decode image');
+            debugPrint('Error: Failed to decode image');
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('Failed to decode template image')),
@@ -156,10 +158,10 @@ class _CustomizeInvitationScreenState extends State<CustomizeInvitationScreen> {
             }
           }
         } else if (response.statusCode == 404) {
-          print('No template found for event ID: ${widget.eventId}');
+          debugPrint('No template found for event ID: ${widget.eventId}');
           // This is not an error, just no template exists yet for this event
         } else {
-          print('Error: Failed to fetch template. Status code: ${response.statusCode}');
+          debugPrint('Error: Failed to fetch template. Status code: ${response.statusCode}');
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text('Failed to load template. Status code: ${response.statusCode}')),
@@ -167,7 +169,7 @@ class _CustomizeInvitationScreenState extends State<CustomizeInvitationScreen> {
           }
         }
       } catch (e) {
-        print('Error loading template: $e');
+        debugPrint('Error loading template: $e');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Error loading template: $e')),
@@ -177,10 +179,10 @@ class _CustomizeInvitationScreenState extends State<CustomizeInvitationScreen> {
         if (mounted) {
           setState(() => _isLoading = false);
         }
-        print('Template loading completed');
+        debugPrint('Template loading completed');
       }
     } else {
-      print('No template found for event ID: ${widget.eventId}');
+      debugPrint('No template found for event ID: ${widget.eventId}');
     }
   }
 
@@ -202,12 +204,12 @@ class _CustomizeInvitationScreenState extends State<CustomizeInvitationScreen> {
 
   void _updateDisplayResolution() {
     if (_originalDimensions == null) {
-      print('Warning: Cannot update display resolution, original dimensions are null');
+      debugPrint('Warning: Cannot update display resolution, original dimensions are null');
       return;
     }
 
     if (!mounted) {
-      print('Warning: Cannot update display resolution, widget is not mounted');
+      debugPrint('Warning: Cannot update display resolution, widget is not mounted');
       return;
     }
 
@@ -220,7 +222,7 @@ class _CustomizeInvitationScreenState extends State<CustomizeInvitationScreen> {
           ? maxWidth / _originalDimensions!.width
           : maxHeight / _originalDimensions!.height;
 
-      print('Updating display resolution: original=${_originalDimensions!.width}x${_originalDimensions!.height}, scale=$scale');
+      debugPrint('Updating display resolution: original=${_originalDimensions!.width}x${_originalDimensions!.height}, scale=$scale');
 
       setState(() {
         _displayResolution = Size(
@@ -229,9 +231,9 @@ class _CustomizeInvitationScreenState extends State<CustomizeInvitationScreen> {
         );
       });
 
-      print('Display resolution updated: ${_displayResolution!.width}x${_displayResolution!.height}');
+      debugPrint('Display resolution updated: ${_displayResolution!.width}x${_displayResolution!.height}');
     } catch (e) {
-      print('Error updating display resolution: $e');
+      debugPrint('Error updating display resolution: $e');
     }
   }
 
@@ -289,7 +291,7 @@ class _CustomizeInvitationScreenState extends State<CustomizeInvitationScreen> {
         }
       }
     } catch (e) {
-      print('Permission request error: $e');
+      debugPrint('Permission request error: $e');
     }
   }
 
@@ -346,7 +348,7 @@ class _CustomizeInvitationScreenState extends State<CustomizeInvitationScreen> {
 
       await _uploadImage();
     } catch (e) {
-      print('Image picking error: $e');
+      debugPrint('Image picking error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error selecting image: ${e.toString()}')),
@@ -402,7 +404,7 @@ class _CustomizeInvitationScreenState extends State<CustomizeInvitationScreen> {
         }
       }
     } catch (e) {
-      print('Upload error: $e');
+      debugPrint('Upload error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Upload error: ${e.toString()}')),
@@ -711,108 +713,18 @@ class _CustomizeInvitationScreenState extends State<CustomizeInvitationScreen> {
                   const SizedBox(height: 24),
 
                   // Upload Button
-                  Card(
-                    elevation: 3,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: ElevatedButton.icon(
-                        onPressed: _handleFileUpload,
-                        icon: const Icon(Icons.upload_file),
-                        label: Text(_imageFile != null
-                            ? 'Replace Invitation Image'
-                            : 'Upload Invitation Image'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: primaryColor,
-                          foregroundColor: Colors.white,
-                          minimumSize: const Size(double.infinity, 48),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                      ),
-                    ),
+                  InvitationUploadCard(
+                    imageFile: _imageFile,
+                    onUpload: _handleFileUpload,
                   ),
                   const SizedBox(height: 24),
 
                   // Selection Tools
                   if (_imageFile != null)
-                    Card(
-                      elevation: 2,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Selection Tools',
-                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              'Draw selection areas and drag them to reposition.',
-                              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                            ),
-                            const SizedBox(height: 12),
-                            Wrap(
-                              spacing: 12,
-                              runSpacing: 12,
-                              children: [
-                                SizedBox(
-                                  width: (MediaQuery.of(context).size.width - 80) / 2,
-                                  child: ElevatedButton.icon(
-                                    onPressed: () => _startSelecting('name'),
-                                    icon: const Icon(Icons.text_fields, size: 20),
-                                    label: const Text('Name Area'),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: accentColor,
-                                      foregroundColor: Colors.white,
-                                      padding: const EdgeInsets.symmetric(vertical: 12),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                SizedBox(
-                                  width: (MediaQuery.of(context).size.width - 80) / 2,
-                                  child: ElevatedButton.icon(
-                                    onPressed: () => _startSelecting('qrcode'),
-                                    icon: const Icon(Icons.qr_code, size: 20),
-                                    label: const Text('QR Code'),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: secondaryColor,
-                                      foregroundColor: Colors.white,
-                                      padding: const EdgeInsets.symmetric(vertical: 12),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-                            SizedBox(
-                              width: double.infinity,
-                              child: ElevatedButton.icon(
-                                onPressed: _saveSelections,
-                                icon: const Icon(Icons.save, size: 20),
-                                label: const Text('Save Selections'),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.amber[700],
-                                  foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(vertical: 12),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                    InvitationSelectionTools(
+                      onSelectName: () => _startSelecting('name'),
+                      onSelectQrCode: () => _startSelecting('qrcode'),
+                      onSave: _saveSelections,
                     ),
                   const SizedBox(height: 24),
 
@@ -842,7 +754,7 @@ class _CustomizeInvitationScreenState extends State<CustomizeInvitationScreen> {
                                   _draggingType = selectionType;
                                   _dragStartOffset = position;
                                   _originalRect = selections[selectionType];
-                                  print('Started dragging $selectionType selection');
+                                  debugPrint('Started dragging $selectionType selection');
                                 });
 
                                 // Show a brief message to indicate dragging has started

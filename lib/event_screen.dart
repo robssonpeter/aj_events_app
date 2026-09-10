@@ -55,7 +55,7 @@ class _EventScreenState extends State<EventScreen> {
     try {
       final status = await ApiService.checkCollaboratorStatus(widget.eventId);
       setState(() {
-        print("the owner of the event is ${status['is_owner']}");
+        debugPrint("the owner of the event is ${status['is_owner']}");
         _isEventOwner = status['is_owner'] ?? false;
       });
     } catch (e) {

@@ -4,13 +4,12 @@ import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:aj_events/theme.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
-import 'package:http/http.dart' as http;
 import 'package:image_gallery_saver/image_gallery_saver.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
-import 'dart:convert';
 import 'dart:typed_data';
 import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -20,6 +19,9 @@ import 'package:excel/excel.dart';
 
 import 'common.dart';
 import 'api_service.dart';
+import 'widgets/invitee_card.dart';
+import 'widgets/invitee_actions_toolbar.dart';
+import 'widgets/invitee_filter_bar.dart';
 
 class ManageInviteesScreen extends StatefulWidget {
   final int eventId;
@@ -136,6 +138,29 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
     });
 
     await _fetchFilteredInvitees();
+  }
+
+  // Method for pull-to-refresh functionality
+  Future<void> _refreshInvitees() async {
+    // Reset pagination
+    setState(() {
+      currentPage = 1;
+      lastPage = 1;
+
+      // Clear the appropriate list based on filter status
+      if (_isFilterActive || _searchQuery.isNotEmpty) {
+        filteredInvitees = [];
+      } else {
+        invitees = [];
+      }
+    });
+
+    // Use the appropriate fetch method based on filter status
+    if (_isFilterActive || _searchQuery.isNotEmpty) {
+      await _fetchFilteredInvitees();
+    } else {
+      await fetchInvitees();
+    }
   }
 
   Future<void> _fetchFilteredInvitees() async {
@@ -317,12 +342,15 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
                   Row(
                     children: [
                       Expanded(
-                        child: Text(
-                          'Phone: ${invitee['phone_number']}',
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: Colors.black54,
+                        child: GestureDetector(
+                          onTap: () => _makePhoneCall(invitee),
+                          child: Text(
+                            'Phone: ${invitee['phone_number']}',
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: Colors.blue,
+                            ),
+                            overflow: TextOverflow.ellipsis,
                           ),
-                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                       if (invitee['is_on_whatsapp'] == 1 || invitee['is_on_whatsapp'] == true)
@@ -402,7 +430,7 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
         _sendDownloadCardMessage(invitee);
         break;
       case 'preview':
-        _showPreviewDialog(invitee['slug']);
+        _showPreviewDialog(invitee);
         break;
       case 'edit':
         _showEditInviteeDialog(invitee);
@@ -464,6 +492,8 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
 
   Future<void> _makePhoneCall(Map invitee) async {
     final phoneNumber = invitee['phone_number'];
+    final name = invitee['name'];
+
     if (phoneNumber == null || phoneNumber.toString().trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Phone number is not available')),
@@ -479,6 +509,11 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
     try {
       if (await canLaunchUrl(phoneUri)) {
         await launchUrl(phoneUri);
+
+        // Show dialog after call
+        if (context.mounted) {
+          _showCallFollowUpDialog(invitee);
+        }
       } else {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -493,6 +528,65 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
         );
       }
     }
+  }
+
+  void _showCallFollowUpDialog(Map invitee) {
+    final name = invitee['name'];
+    bool isMarkingAsSeen = false;
+
+    showDialog(
+      context: context,
+      builder: (BuildContext dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              title: Text('Call Follow-up'),
+              content: Text('Has $name seen the invitation?'),
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(dialogContext).pop();
+                  },
+                  child: Text('No'),
+                ),
+                ElevatedButton(
+                  onPressed: isMarkingAsSeen 
+                    ? null 
+                    : () async {
+                        setState(() {
+                          isMarkingAsSeen = true;
+                        });
+
+                        await _markInviteeSeen(invitee);
+
+                        if (dialogContext.mounted) {
+                          Navigator.of(dialogContext).pop();
+                        }
+                      },
+                  child: isMarkingAsSeen
+                    ? Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                            ),
+                          ),
+                          SizedBox(width: 8),
+                          Text('Yes'),
+                        ],
+                      )
+                    : Text('Yes'),
+                ),
+              ],
+            );
+          }
+        );
+      },
+    );
   }
 
   Future<void> _markInviteeSeen(Map invitee) async {
@@ -1279,173 +1373,75 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
             padding: const EdgeInsets.all(16.0),
             child: Column(
               children: [
-                // Action buttons row with more compact layout
-                Row(
-                  children: [
-                    // Action buttons in a more compact layout
-                    Expanded(
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Row(
-                          children: [
-                            _actionButton(
-                              Icons.add, 
-                              'Add Invitee', 
-                              _showAddInviteeDialog
-                            ),
-                            const SizedBox(width: 24),
-                            _actionButton(
-                              Icons.upload_file, 
-                              'Import Excel', 
-                              _importFromExcel
-                            ),
-                            const SizedBox(width: 24),
-                            _actionButton(
-                              Icons.filter_list, 
-                              _isFilterActive ? 'Filters Active' : 'Filter', 
-                              _showFilterDialog,
-                              isActive: _isFilterActive,
-                            ),
-                            const SizedBox(width: 24),
-                            _actionButton(
-                              Icons.message_outlined,
-                              'Manage Templates',
-                              _showTemplateOptions,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
+                InviteeActionsToolbar(
+                  isFilterActive: _isFilterActive,
+                  onAddInvitee: _showAddInviteeDialog,
+                  onImportExcel: _importFromExcel,
+                  onFilter: _showFilterDialog,
+                  onManageTemplates: _showTemplateOptions,
                 ),
 
                 // Show active filters if any
                 if (_isFilterActive)
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Show result count
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Padding(
-                          padding: const EdgeInsets.only(top: 8.0, bottom: 4.0),
-                          child: Text(
-                            'Found ${totalFilteredInvitees} ${totalFilteredInvitees == 1 ? 'invitee' : 'invitees'}',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: Theme.of(context).primaryColor,
-                            ),
-                          ),
-                        ),
-                      ),
-                      // Filter chips
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Padding(
-                          padding: const EdgeInsets.only(top: 4.0),
-                          child: Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            alignment: WrapAlignment.start,
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                          children: [
-                            //const Text('Active filters:', style: TextStyle(fontWeight: FontWeight.bold)),
-                            if (_filterWhatsappStatus != null)
-                              Chip(
-                                label: Text(_filterWhatsappStatus! ? 'Has WhatsApp' : 'No WhatsApp'),
-                                onDeleted: () {
-                                  // Cancel any pending search timer
-                                  _searchDebounceTimer?.cancel();
-
-                                  setState(() {
-                                    _filterWhatsappStatus = null;
-                                    _isFilterActive = _filterWhatsappStatus != null || _filterInvitationSent != null || _filterAttendanceStatus != null || _filterCardRedeemed != null || _filterSeenStatus != null;
-                                  });
-                                  _applyFilters();
-                                },
-                              ),
-                            if (_filterInvitationSent != null)
-                              Chip(
-                                label: Text(_filterInvitationSent! ? 'Invitation Sent' : 'Not Sent'),
-                                onDeleted: () {
-                                  // Cancel any pending search timer
-                                  _searchDebounceTimer?.cancel();
-
-                                  setState(() {
-                                    _filterInvitationSent = null;
-                                    _isFilterActive = _filterWhatsappStatus != null || _filterInvitationSent != null || _filterAttendanceStatus != null || _filterCardRedeemed != null || _filterSeenStatus != null;
-                                  });
-                                  _applyFilters();
-                                },
-                              ),
-                            if (_filterAttendanceStatus != null)
-                              Chip(
-                                label: Text(_filterAttendanceStatus == 'attending' 
-                                    ? 'Attending' 
-                                    : _filterAttendanceStatus == 'not_attending' 
-                                        ? 'Not Attending' 
-                                        : 'Pending'),
-                                onDeleted: () {
-                                  // Cancel any pending search timer
-                                  _searchDebounceTimer?.cancel();
-
-                                  setState(() {
-                                    _filterAttendanceStatus = null;
-                                    _isFilterActive = _filterWhatsappStatus != null || _filterInvitationSent != null || _filterAttendanceStatus != null || _filterCardRedeemed != null || _filterSeenStatus != null;
-                                  });
-                                  _applyFilters();
-                                },
-                              ),
-                            if (_filterCardRedeemed != null)
-                              Chip(
-                                label: Text(_filterCardRedeemed! ? 'Card Redeemed' : 'Card Not Redeemed'),
-                                onDeleted: () {
-                                  // Cancel any pending search timer
-                                  _searchDebounceTimer?.cancel();
-
-                                  setState(() {
-                                    _filterCardRedeemed = null;
-                                    _isFilterActive = _filterWhatsappStatus != null || _filterInvitationSent != null || _filterAttendanceStatus != null || _filterCardRedeemed != null || _filterSeenStatus != null;
-                                  });
-                                  _applyFilters();
-                                },
-                              ),
-                            if (_filterSeenStatus != null)
-                              Chip(
-                                label: Text(_filterSeenStatus! ? 'Seen' : 'Not Seen'),
-                                onDeleted: () {
-                                  // Cancel any pending search timer
-                                  _searchDebounceTimer?.cancel();
-
-                                  setState(() {
-                                    _filterSeenStatus = null;
-                                    _isFilterActive = _filterWhatsappStatus != null || _filterInvitationSent != null || _filterAttendanceStatus != null || _filterCardRedeemed != null || _filterSeenStatus != null;
-                                  });
-                                  _applyFilters();
-                                },
-                              ),
-                            TextButton(
-                              onPressed: () {
-                                // Cancel any pending search timer
-                                _searchDebounceTimer?.cancel();
-
-                                setState(() {
-                                  _filterWhatsappStatus = null;
-                                  _filterInvitationSent = null;
-                                  _filterAttendanceStatus = null;
-                                  _filterCardRedeemed = null;
-                                  _filterSeenStatus = null;
-                                  _isFilterActive = false;
-                                });
-                                _applyFilters();
-                              },
-                              child: const Text('Clear All'),
-                            ),
-                          ],
-                        ),
-                      ),
-                      ),
-                    ],
+                  InviteeFilterBar(
+                    totalCount: totalFilteredInvitees,
+                    filterWhatsappStatus: _filterWhatsappStatus,
+                    filterInvitationSent: _filterInvitationSent,
+                    filterAttendanceStatus: _filterAttendanceStatus,
+                    filterCardRedeemed: _filterCardRedeemed,
+                    filterSeenStatus: _filterSeenStatus,
+                    onClearWhatsapp: () {
+                      _searchDebounceTimer?.cancel();
+                      setState(() {
+                        _filterWhatsappStatus = null;
+                        _isFilterActive = _filterInvitationSent != null || _filterAttendanceStatus != null || _filterCardRedeemed != null || _filterSeenStatus != null;
+                      });
+                      _applyFilters();
+                    },
+                    onClearInvitationSent: () {
+                      _searchDebounceTimer?.cancel();
+                      setState(() {
+                        _filterInvitationSent = null;
+                        _isFilterActive = _filterWhatsappStatus != null || _filterAttendanceStatus != null || _filterCardRedeemed != null || _filterSeenStatus != null;
+                      });
+                      _applyFilters();
+                    },
+                    onClearAttendance: () {
+                      _searchDebounceTimer?.cancel();
+                      setState(() {
+                        _filterAttendanceStatus = null;
+                        _isFilterActive = _filterWhatsappStatus != null || _filterInvitationSent != null || _filterCardRedeemed != null || _filterSeenStatus != null;
+                      });
+                      _applyFilters();
+                    },
+                    onClearRedeemed: () {
+                      _searchDebounceTimer?.cancel();
+                      setState(() {
+                        _filterCardRedeemed = null;
+                        _isFilterActive = _filterWhatsappStatus != null || _filterInvitationSent != null || _filterAttendanceStatus != null || _filterSeenStatus != null;
+                      });
+                      _applyFilters();
+                    },
+                    onClearSeen: () {
+                      _searchDebounceTimer?.cancel();
+                      setState(() {
+                        _filterSeenStatus = null;
+                        _isFilterActive = _filterWhatsappStatus != null || _filterInvitationSent != null || _filterAttendanceStatus != null || _filterCardRedeemed != null;
+                      });
+                      _applyFilters();
+                    },
+                    onClearAll: () {
+                      _searchDebounceTimer?.cancel();
+                      setState(() {
+                        _filterWhatsappStatus = null;
+                        _filterInvitationSent = null;
+                        _filterAttendanceStatus = null;
+                        _filterCardRedeemed = null;
+                        _filterSeenStatus = null;
+                        _isFilterActive = false;
+                      });
+                      _applyFilters();
+                    },
                   ),
               ],
             ),
@@ -1578,19 +1574,47 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
                       ],
                     ),
                   )
-                : ListView.builder(
-                    controller: _scrollController,
-                    itemCount: (_isFilterActive || _searchQuery.isNotEmpty ? filteredInvitees : invitees).length + (isLoading ? 1 : 0),
-                    itemBuilder: (context, index) {
-                      final displayList = _isFilterActive || _searchQuery.isNotEmpty ? filteredInvitees : invitees;
-                      if (index < displayList.length) {
-                        return _buildInviteeCard(displayList[index]);
-                      }
-                      return const Padding(
-                        padding: EdgeInsets.all(16.0),
-                        child: Center(child: CircularProgressIndicator()),
-                      );
-                    },
+                : RefreshIndicator(
+                    onRefresh: _refreshInvitees,
+                    child: ListView.builder(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      controller: _scrollController,
+                      itemCount: (_isFilterActive || _searchQuery.isNotEmpty ? filteredInvitees : invitees).length + (isLoading ? 1 : 0),
+                      itemBuilder: (context, index) {
+                        final displayList = _isFilterActive || _searchQuery.isNotEmpty ? filteredInvitees : invitees;
+                        if (index < displayList.length) {
+                          final inv = displayList[index];
+                          final invId = inv['id'];
+                          return InviteeCard(
+                            invitee: inv,
+                            isBulkMode: isBulkMode,
+                            isSelected: selectedInviteeIds.contains(invId),
+                            onLongPress: () => setState(() {
+                              isBulkMode = true;
+                              selectedInviteeIds.add(invId);
+                            }),
+                            onTap: () {
+                              if (isBulkMode) {
+                                setState(() {
+                                  if (selectedInviteeIds.contains(invId)) {
+                                    selectedInviteeIds.remove(invId);
+                                    if (selectedInviteeIds.isEmpty) isBulkMode = false;
+                                  } else {
+                                    selectedInviteeIds.add(invId);
+                                  }
+                                });
+                              }
+                            },
+                            onAction: _handleAction,
+                            onPhoneCall: _makePhoneCall,
+                          );
+                        }
+                        return const Padding(
+                          padding: EdgeInsets.all(16.0),
+                          child: Center(child: CircularProgressIndicator()),
+                        );
+                      },
+                    ),
                   ),
           ),
         ],
@@ -2368,9 +2392,38 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
     );
   }
 
-  void _showPreviewDialog(String slug) {
-    print(slug);
+  /// Renders the SMS template with the given invitee's data.
+  /// Returns null if no template has been set up yet.
+  String? _buildRenderedMessage(Map invitee) {
+    final templateMessage = _templates['whatsapp']?['whatsapp_message'] as String?;
+    if (templateMessage == null) return null;
+
+    final String name = invitee['name'] ?? '';
+    final String code = invitee['invitation_code'] ?? '';
+    final int numberOfInvitees = invitee['number_of_invitees'] ?? 1;
+    final String type = numberOfInvitees == 1
+        ? 'Single'
+        : numberOfInvitees == 2
+            ? 'Double'
+            : 'Triple';
+
+    return templateMessage
+        .replaceAll('{name}', name)
+        .replaceAll('{code}', code)
+        .replaceAll('{invitation_code}', code)
+        .replaceAll('{type}', type)
+        .replaceAll('{link}', 'https://events.ajiriwa.net/invitation/$code');
+  }
+
+  void _showPreviewDialog(Map invitee) {
+    final String slug = invitee['slug'] ?? '';
+    debugPrint(slug);
     final url = 'https://events.ajiriwa.net/invitation-card/image/$slug';
+    final String shareCaption =
+        _buildRenderedMessage(invitee) ?? 'Check out this invitation!';
+    final String phone = invitee['phone_number'] ?? '';
+    final bool isOnWhatsapp =
+        invitee['is_on_whatsapp'] == 1 || invitee['is_on_whatsapp'] == true;
 
     showDialog(
       context: context,
@@ -2384,6 +2437,7 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  // ── Top app-bar ────────────────────────────────────────────
                   AppBar(
                     title: const Text('Invitation Preview'),
                     automaticallyImplyLeading: false,
@@ -2396,7 +2450,9 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
                       IconButton(
                         icon: const Icon(Icons.share),
                         tooltip: 'Share',
-                        onPressed: isLoading ? null : () => _shareImage(url),
+                        onPressed: isLoading
+                            ? null
+                            : () => _shareImage(url, caption: shareCaption),
                       ),
                       IconButton(
                         icon: const Icon(Icons.close),
@@ -2404,6 +2460,8 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
                       ),
                     ],
                   ),
+
+                  // ── Card image ─────────────────────────────────────────────
                   Flexible(
                     child: Image.network(
                       url,
@@ -2412,9 +2470,7 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
                         if (loadingProgress == null) {
                           if (isLoading) {
                             WidgetsBinding.instance.addPostFrameCallback((_) {
-                              setState(() {
-                                isLoading = false;
-                              });
+                              setState(() => isLoading = false);
                             });
                           }
                           return InteractiveViewer(child: child);
@@ -2429,9 +2485,7 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
                       errorBuilder: (context, error, stackTrace) {
                         if (isLoading) {
                           WidgetsBinding.instance.addPostFrameCallback((_) {
-                            setState(() {
-                              isLoading = false;
-                            });
+                            setState(() => isLoading = false);
                           });
                         }
                         return const Center(
@@ -2443,6 +2497,36 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
                       },
                     ),
                   ),
+
+                  // ── WhatsApp direct-send button (only if on WhatsApp) ──────
+                  if (isOnWhatsapp)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: isLoading
+                              ? null
+                              : () {
+                                  Navigator.pop(context);
+                                  _shareImageToWhatsApp(url, phone, shareCaption);
+                                },
+                          icon: const FaIcon(
+                            FontAwesomeIcons.whatsapp,
+                            size: 20,
+                          ),
+                          label: const Text('Send via WhatsApp'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF25D366),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             );
@@ -2545,7 +2629,7 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
     }
   }
 
-  Future<void> _shareImage(String url) async {
+  Future<void> _shareImage(String url, {String caption = 'Check out this invitation!'}) async {
     try {
       // Show loading indicator
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2603,10 +2687,10 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
 
       debugPrint('File downloaded successfully. Size: ${await file.length()} bytes');
 
-      // Share the file
+      // Share the file with the rendered invitation message as caption
       await Share.shareXFiles(
         [XFile(filePath)],
-        text: 'Check out this invitation!',
+        text: caption,
         subject: 'Event Invitation',
       );
 
@@ -2619,6 +2703,72 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Share failed: $e')),
       );
+    }
+  }
+
+  /// Shares the invitation card image directly to the invitee's WhatsApp chat,
+  /// pre-filling the caption with the rendered WhatsApp message template.
+  Future<void> _shareImageToWhatsApp(String url, String phone, String caption) async {
+    const _whatsappChannel = MethodChannel('net.ajiriwa.events/whatsapp');
+
+    try {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Opening WhatsApp...')),
+      );
+
+      // Download image to temp dir
+      final dio = Dio();
+      dio.options.connectTimeout = const Duration(seconds: 15);
+      dio.options.receiveTimeout = const Duration(seconds: 15);
+
+      final dir = await getTemporaryDirectory();
+      final filename = 'invitation_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final filePath = '${dir.path}/$filename';
+
+      final response = await dio.download(url, filePath);
+      if (response.statusCode != 200) {
+        throw Exception('Failed to download image');
+      }
+
+      // Normalise phone: strip non-digits (keep the digits only; JID format = digits@s.whatsapp.net)
+      final digits = phone.replaceAll(RegExp(r'[^\d]'), '');
+
+      if (Platform.isAndroid) {
+        try {
+          await _whatsappChannel.invokeMethod('shareToWhatsApp', {
+            'phone': digits,
+            'text': caption,
+            'filePath': filePath,
+          });
+          return;
+        } on PlatformException catch (e) {
+          if (e.code == 'WHATSAPP_NOT_INSTALLED') {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('WhatsApp is not installed on this device')),
+              );
+            }
+            return;
+          }
+          // Any other native error — fall through to generic share
+          debugPrint('WhatsApp channel error: $e');
+        }
+      }
+
+      // iOS fallback or if native channel failed: open the chat via URL then share image
+      final whatsappUri = Uri.parse('https://wa.me/$digits?text=${Uri.encodeComponent(caption)}');
+      if (await canLaunchUrl(whatsappUri)) {
+        await launchUrl(whatsappUri, mode: LaunchMode.externalApplication);
+      }
+      // Share image through system sheet (user can tap WhatsApp)
+      await Share.shareXFiles([XFile(filePath)], text: caption, subject: 'Event Invitation');
+    } catch (e, stackTrace) {
+      debugPrint('WhatsApp share error: $e\n$stackTrace');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to share via WhatsApp: $e')),
+        );
+      }
     }
   }
 

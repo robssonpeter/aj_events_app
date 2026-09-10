@@ -34,14 +34,20 @@ android {
         applicationId = "net.ajiriwa.events"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion//flutter.minSdkVersion
-        targetSdk = 36//flutter.targetSdkVersion
+        minSdk = flutter.minSdkVersion
+        targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+    }
 
-        // Add support for 16 KB memory page sizes (required by Google by Nov 1, 2025)
-        ndk {
-            abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+    // Store native libraries uncompressed and 16 KB page-aligned in the APK/AAB.
+    // Required for Android 15+ 16 KB memory page size support (Google Play policy from May 2026).
+    // The Flutter engine (3.22+) and NDK r27+ already compile .so files with 16 KB ELF alignment;
+    // this setting ensures they are packaged without compression so the OS can memory-map them
+    // directly from the archive at 16 KB boundaries.
+    packaging {
+        jniLibs {
+            useLegacyPackaging = false
         }
     }
 
