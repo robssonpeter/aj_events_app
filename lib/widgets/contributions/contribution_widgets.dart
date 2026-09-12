@@ -260,6 +260,97 @@ class ContributorTile extends StatelessWidget {
   }
 }
 
+/// Placeholder rows shown while a filter or search refetches.
+///
+/// Skeletons rather than a spinner: they keep the list's shape, so the screen
+/// does not jump when the real rows land, and they make it obvious *which*
+/// part of the screen is changing — the totals above stay put because they are
+/// event-wide and unaffected by the filter.
+class ContributorSkeletonList extends StatefulWidget {
+  final int rows;
+
+  const ContributorSkeletonList({super.key, this.rows = 6});
+
+  @override
+  State<ContributorSkeletonList> createState() => _ContributorSkeletonListState();
+}
+
+class _ContributorSkeletonListState extends State<ContributorSkeletonList>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse;
+
+  @override
+  void initState() {
+    super.initState();
+    _pulse = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _pulse,
+      builder: (_, _) {
+        final opacity = 0.35 + (_pulse.value * 0.35);
+
+        return ListView.separated(
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: widget.rows,
+          separatorBuilder: (_, _) => Divider(height: 1, color: Colors.grey.shade200),
+          itemBuilder: (_, _) => Opacity(
+            opacity: opacity,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _bar(140, 12),
+                        const SizedBox(height: 7),
+                        _bar(190, 10),
+                        const SizedBox(height: 8),
+                        _bar(90, 10),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _bar(double width, double height) => Container(
+        width: width,
+        height: height,
+        decoration: BoxDecoration(
+          color: Colors.grey.shade300,
+          borderRadius: BorderRadius.circular(4),
+        ),
+      );
+}
+
 /// Shown when a filter or an empty list leaves nothing to display.
 class ContributionEmptyState extends StatelessWidget {
   final IconData icon;

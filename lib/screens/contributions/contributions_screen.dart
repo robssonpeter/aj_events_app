@@ -26,13 +26,19 @@ class _ContributionsScreenState extends State<ContributionsScreen> {
   final _searchController = TextEditingController();
 
   ContributionsPage? _page;
-  bool _loading = true;
+  bool _loading = true;   // very first load — nothing on screen yet
+  bool _refetching = false; // a filter or search is fetching over existing data
   String? _error;
   bool _busy = false;
 
   String _status = '';
   String _group = '';
   Timer? _searchDebounce;
+
+  // Tapping chips quickly fires overlapping requests; on a slow connection an
+  // earlier one can land last and show the wrong filter's data. Only the newest
+  // request is allowed to write to state.
+  int _requestId = 0;
 
   final Set<int> _selected = {};
   bool get _selectionMode => _selected.isNotEmpty;
@@ -59,9 +65,13 @@ class _ContributionsScreenState extends State<ContributionsScreen> {
     super.dispose();
   }
 
-  Future<void> _load() async {
+  /// [showSkeleton] is off for pull-to-refresh, which draws its own spinner.
+  Future<void> _load({bool showSkeleton = true}) async {
+    final requestId = ++_requestId;
+
     setState(() {
       _loading = _page == null;
+      _refetching = showSkeleton && _page != null;
       _error = null;
     });
 
@@ -73,17 +83,19 @@ class _ContributionsScreenState extends State<ContributionsScreen> {
         search: _searchController.text,
       );
 
-      if (!mounted) return;
+      if (!mounted || requestId != _requestId) return;
       setState(() {
         _page = page;
         _loading = false;
+        _refetching = false;
         // Drop anything that filtered out from under the selection.
         _selected.removeWhere((id) => !page.contributors.any((c) => c.id == id));
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || requestId != _requestId) return;
       setState(() {
         _loading = false;
+        _refetching = false;
         _error = e.toString().replaceFirst('Exception: ', '');
       });
     }
@@ -257,7 +269,7 @@ class _ContributionsScreenState extends State<ContributionsScreen> {
       body: Stack(
         children: [
           RefreshIndicator(
-            onRefresh: _load,
+            onRefresh: () => _load(showSkeleton: false),
             child: _buildBody(page),
           ),
           if (_busy)
@@ -311,7 +323,9 @@ class _ContributionsScreenState extends State<ContributionsScreen> {
         ),
         _filters(page),
         Expanded(
-          child: list.isEmpty
+          child: _refetching
+              ? const ContributorSkeletonList()
+              : list.isEmpty
               ? ListView(
                   children: [
                     const SizedBox(height: 40),
