@@ -13,6 +13,7 @@ import 'package:aj_events/api_service.dart';
 import 'scan_screen.dart';
 import 'manage_invitees_screen.dart';
 import 'manage_collaborators_screen.dart';
+import 'screens/contributions/contributions_screen.dart';
 
 class EventScreen extends StatefulWidget {
   final int eventId;
@@ -193,6 +194,11 @@ class _EventScreenState extends State<EventScreen> {
                 icon: Icons.group,
                 title: 'Manage Invitees',
                 onTap: () => _navigateTo(ManageInviteesScreen(eventId: widget.eventId)),
+              ),
+              _buildOptionTile(
+                icon: Icons.volunteer_activism,
+                title: 'Mchango (Contributions)',
+                onTap: () => _navigateTo(ContributionsScreen(eventId: widget.eventId)),
               ),
               _buildOptionTile(
                 icon: Icons.badge,
