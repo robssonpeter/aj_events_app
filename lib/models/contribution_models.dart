@@ -20,6 +20,14 @@ DateTime? _toDate(dynamic v) {
   return DateTime.tryParse(v.toString());
 }
 
+/// PHP encodes an empty associative array as `[]`, not `{}`, so a map field
+/// can arrive as a list when it happens to be empty. Treat that as empty
+/// rather than letting the cast throw.
+Map<String, dynamic> _toMap(dynamic v) {
+  if (v is Map) return Map<String, dynamic>.from(v);
+  return <String, dynamic>{};
+}
+
 /// One payment booked against a promise.
 class ContributionPayment {
   final int id;
@@ -192,11 +200,8 @@ class ContributionStats {
 
   factory ContributionStats.fromJson(Map<String, dynamic> json) {
     final counts = <String, int>{};
-    final raw = json['counts'];
 
-    if (raw is Map) {
-      raw.forEach((k, v) => counts[k.toString()] = _toInt(v));
-    }
+    _toMap(json['counts']).forEach((k, v) => counts[k] = _toInt(v));
 
     return ContributionStats(
       contributors: _toInt(json['contributors']),
@@ -310,19 +315,17 @@ class ContributionSettings {
   });
 
   factory ContributionSettings.fromJson(Map<String, dynamic> json) {
-    final s = Map<String, dynamic>.from(json['settings'] ?? {});
-    final m = Map<String, dynamic>.from(json['messages'] ?? {});
+    final s = _toMap(json['settings']);
+    final m = _toMap(json['messages']);
 
     List<T> listOf<T>(dynamic raw, T Function(Map<String, dynamic>) build) {
       if (raw is! List) return <T>[];
-      return raw.map((e) => build(Map<String, dynamic>.from(e))).toList();
+      return raw.map((e) => build(_toMap(e))).toList();
     }
 
     final options = <String, String>{};
-    final rawOptions = json['payment_method_options'];
-    if (rawOptions is Map) {
-      rawOptions.forEach((k, v) => options[k.toString()] = v.toString());
-    }
+
+    _toMap(json['payment_method_options']).forEach((k, v) => options[k] = v.toString());
 
     return ContributionSettings(
       mode: json['contribution_mode']?.toString() ?? 'direct',

@@ -28,6 +28,11 @@ class ContributionsApi {
     ));
   }
 
+  /// An empty PHP associative array encodes as `[]`, so a response that should
+  /// be an object can arrive as a list. Fall back to empty instead of throwing.
+  static Map<String, dynamic> _map(dynamic v) =>
+      v is Map ? Map<String, dynamic>.from(v) : <String, dynamic>{};
+
   /// Surface the server's own wording — it explains *why* something failed
   /// (no template, no SMS body, outside the 24h window) far better than we can.
   static String _error(DioException e, String fallback) {
@@ -65,7 +70,7 @@ class ContributionsApi {
         'per_page': 100,
       });
 
-      return ContributionsPage.fromJson(Map<String, dynamic>.from(res.data));
+      return ContributionsPage.fromJson(_map(res.data));
     } on DioException catch (e) {
       throw Exception(_error(e, 'Could not load the contribution list'));
     }
@@ -76,7 +81,7 @@ class ContributionsApi {
 
     try {
       final res = await dio.get('/events/$eventId/contributions/stats');
-      return ContributionStats.fromJson(Map<String, dynamic>.from(res.data));
+      return ContributionStats.fromJson(_map(res.data));
     } on DioException catch (e) {
       throw Exception(_error(e, 'Could not load the totals'));
     }
@@ -103,7 +108,7 @@ class ContributionsApi {
         if (notes != null && notes.isNotEmpty) 'notes': notes,
       });
 
-      return Contributor.fromJson(Map<String, dynamic>.from(res.data));
+      return Contributor.fromJson(_map(res.data));
     } on DioException catch (e) {
       throw Exception(_error(e, 'Could not add this contributor'));
     }
@@ -118,7 +123,7 @@ class ContributionsApi {
       final res = await dio.post('/events/$eventId/contributors/parse', data: {'text': text});
       final rows = (res.data['rows'] as List?) ?? [];
 
-      return rows.map((e) => ParsedLine.fromJson(Map<String, dynamic>.from(e))).toList();
+      return rows.map((e) => ParsedLine.fromJson(_map(e))).toList();
     } on DioException catch (e) {
       throw Exception(_error(e, 'Could not read that list'));
     }
@@ -156,7 +161,7 @@ class ContributionsApi {
         'notes': (notes == null || notes.isEmpty) ? null : notes,
       });
 
-      return Contributor.fromJson(Map<String, dynamic>.from(res.data));
+      return Contributor.fromJson(_map(res.data));
     } on DioException catch (e) {
       throw Exception(_error(e, 'Could not save the changes'));
     }
@@ -178,7 +183,7 @@ class ContributionsApi {
 
     try {
       final res = await dio.get('/contributors/$pledgeId/card');
-      return CardShare.fromJson(Map<String, dynamic>.from(res.data));
+      return CardShare.fromJson(_map(res.data));
     } on DioException catch (e) {
       throw Exception(_error(e, 'Could not load the card'));
     }
@@ -202,7 +207,7 @@ class ContributionsApi {
       final res = await dio.post('/events/$eventId/contributors/bulk-send-cards',
           data: {'pledge_ids': pledgeIds});
 
-      return BulkResult.fromJson(Map<String, dynamic>.from(res.data));
+      return BulkResult.fromJson(_map(res.data));
     } on DioException catch (e) {
       throw Exception(_error(e, 'Could not send the cards'));
     }
@@ -240,7 +245,7 @@ class ContributionsApi {
         if (notes != null && notes.isNotEmpty) 'notes': notes,
       });
 
-      return Contributor.fromJson(Map<String, dynamic>.from(res.data));
+      return Contributor.fromJson(_map(res.data));
     } on DioException catch (e) {
       throw Exception(_error(e, 'Could not record the payment'));
     }
@@ -251,7 +256,7 @@ class ContributionsApi {
 
     try {
       final res = await dio.delete('/contribution-payments/$contributionId');
-      return Contributor.fromJson(Map<String, dynamic>.from(res.data));
+      return Contributor.fromJson(_map(res.data));
     } on DioException catch (e) {
       throw Exception(_error(e, 'Could not remove the payment'));
     }
@@ -262,7 +267,7 @@ class ContributionsApi {
 
     try {
       final res = await dio.get('/events/$eventId/contribution-settings');
-      return ContributionSettings.fromJson(Map<String, dynamic>.from(res.data));
+      return ContributionSettings.fromJson(_map(res.data));
     } on DioException catch (e) {
       throw Exception(_error(e, 'Could not load the settings'));
     }
@@ -292,7 +297,7 @@ class ContributionsApi {
         },
       });
 
-      return ContributionSettings.fromJson(Map<String, dynamic>.from(res.data));
+      return ContributionSettings.fromJson(_map(res.data));
     } on DioException catch (e) {
       throw Exception(_error(e, 'Could not save the settings'));
     }
