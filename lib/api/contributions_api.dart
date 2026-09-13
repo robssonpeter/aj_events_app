@@ -200,14 +200,14 @@ class ContributionsApi {
     }
   }
 
-  static Future<BulkResult> sendCards(int eventId, List<int> pledgeIds) async {
+  static Future<String> sendCards(int eventId, List<int> pledgeIds) async {
     final dio = await _dio();
 
     try {
       final res = await dio.post('/events/$eventId/contributors/bulk-send-cards',
           data: {'pledge_ids': pledgeIds});
 
-      return BulkResult.fromJson(_map(res.data));
+      return res.data['message']?.toString() ?? 'Cards queued for sending.';
     } on DioException catch (e) {
       throw Exception(_error(e, 'Could not send the cards'));
     }
@@ -396,19 +396,5 @@ class CardShare {
         cardUrl: json['card_url']?.toString() ?? '',
         contributeUrl: json['contribute_url']?.toString() ?? '',
         shareText: json['share_text']?.toString() ?? '',
-      );
-}
-
-class BulkResult {
-  final String message;
-  final int sent;
-  final List<String> failed;
-
-  BulkResult({required this.message, required this.sent, required this.failed});
-
-  factory BulkResult.fromJson(Map<String, dynamic> json) => BulkResult(
-        message: json['message']?.toString() ?? '',
-        sent: int.tryParse('${json['sent'] ?? 0}') ?? 0,
-        failed: ((json['failed'] as List?) ?? []).map((e) => e.toString()).toList(),
       );
 }

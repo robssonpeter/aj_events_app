@@ -142,12 +142,11 @@ class _ContributionsScreenState extends State<ContributionsScreen> {
     if (ok != true) return;
 
     await _run(() async {
-      final result = await ContributionsApi.sendCards(widget.eventId, ids);
-      _snack(result.message);
-
-      if (result.failed.isNotEmpty) {
-        _showFailures(result.failed);
-      }
+      // Sending happens on the server's queue, not this request — the
+      // response only confirms the cards were queued, not that they've
+      // gone out yet.
+      final message = await ContributionsApi.sendCards(widget.eventId, ids);
+      _snack('$message Pull to refresh to see who has received theirs.');
 
       setState(_selected.clear);
       await _load();
@@ -181,30 +180,6 @@ class _ContributionsScreenState extends State<ContributionsScreen> {
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
           FilledButton(onPressed: () => Navigator.pop(context, true), child: Text(confirmLabel)),
         ],
-      ),
-    );
-  }
-
-  /// Failures usually share one cause (no template, no SMS body) — show them
-  /// in full rather than a count, because the message says how to fix it.
-  void _showFailures(List<String> failed) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text('${failed.length} could not be sent'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView(
-            shrinkWrap: true,
-            children: failed
-                .map((f) => Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      child: Text(f, style: const TextStyle(fontSize: 13)),
-                    ))
-                .toList(),
-          ),
-        ),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
       ),
     );
   }
