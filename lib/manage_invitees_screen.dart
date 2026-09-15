@@ -1853,6 +1853,13 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
         sheet.cell(CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: 2)).value = 1;
         sheet.cell(CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: 2)).value = 'No';
 
+        // Third row: WhatsApp column left blank on purpose, to show that
+        // this means "auto-detect" rather than "not on WhatsApp".
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: 3)).value = 'Amina Hassan';
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: 3)).value = '+2550000000';
+        sheet.cell(CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: 3)).value = 1;
+        // Is on WhatsApp intentionally left empty here — auto-detect.
+
         // Save Excel file
         final excelBytes = excel.encode();
         if (excelBytes != null) {
@@ -1862,10 +1869,13 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
           throw Exception('Failed to encode Excel file');
         }
       } else {
-        // Create CSV content with header and sample rows
+        // Create CSV content with header and sample rows. The third row
+        // leaves "Is on WhatsApp" blank on purpose, to show that means
+        // "auto-detect" rather than "not on WhatsApp".
         final csvContent = 'Name,Phone Number,Number of Invitees,Is on WhatsApp\n'
             'John Doe,+1234567890,2,Yes\n'
-            'Jane Smith,+0987654321,1,No';
+            'Jane Smith,+0987654321,1,No\n'
+            'Amina Hassan,+2550000000,1,';
 
         // Write to file
         final file = File(filePath);
@@ -1910,7 +1920,9 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
             '- Name\n'
             '- Phone Number\n'
             '- Number of Invitees\n'
-            '- Is on WhatsApp (Yes/No)\n\n'
+            '- Is on WhatsApp (Yes/No, or leave the cell blank to auto-detect — '
+            'we try WhatsApp first and fall back to SMS if the number turns out '
+            'not to have it)\n\n'
             'Both CSV (.csv) and Excel (.xlsx) files are supported.'
           ),
           actions: [
