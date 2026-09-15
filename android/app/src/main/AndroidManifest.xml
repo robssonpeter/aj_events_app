@@ -9,6 +9,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- "Import from Contacts" when adding contributors/invitees -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
 
 
     <application

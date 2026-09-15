@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../api/contributions_api.dart';
 import '../../models/contribution_models.dart';
 import '../../widgets/contributions/contribution_widgets.dart';
+import '../contact_picker_screen.dart';
 
 /// Add contributors by typing them, one per line.
 ///
@@ -72,6 +73,22 @@ class _AddContributorsScreenState extends State<AddContributorsScreen> {
     }
   }
 
+  Future<void> _importFromContacts() async {
+    final picked = await Navigator.of(context).push<List<PickedContact>>(
+      MaterialPageRoute(builder: (_) => const ContactPickerScreen()),
+    );
+
+    if (picked == null || picked.isEmpty || !mounted) return;
+
+    final lines = picked.map((p) => '${p.name} ${p.phone}').join('\n');
+    final existing = _controller.text.trimRight();
+
+    _controller.text = existing.isEmpty ? lines : '$existing\n$lines';
+    _controller.selection = TextSelection.collapsed(offset: _controller.text.length);
+
+    _onChanged(_controller.text);
+  }
+
   Future<void> _save() async {
     setState(() {
       _saving = true;
@@ -95,7 +112,16 @@ class _AddContributorsScreenState extends State<AddContributorsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Add contributors')),
+      appBar: AppBar(
+        title: const Text('Add contributors'),
+        actions: [
+          IconButton(
+            onPressed: _importFromContacts,
+            icon: const Icon(Icons.contacts_outlined),
+            tooltip: 'Import from Contacts',
+          ),
+        ],
+      ),
       body: Column(
         children: [
           Expanded(
@@ -187,7 +213,8 @@ class _AddContributorsScreenState extends State<AddContributorsScreen> {
           Text(
             'Name, phone number and the amount promised. Order does not matter, and '
             'commas are optional. Leave the amount out for anyone who has not promised yet. '
-            'Shorthand works: 75k, 1.5m, 50,000.',
+            'Shorthand works: 75k, 1.5m, 50,000. Or tap the contacts icon above to import '
+            'people straight from your phone book.',
             style: TextStyle(fontSize: 12, color: Colors.blue.shade900, height: 1.35),
           ),
         ],
