@@ -116,16 +116,22 @@ class ApiService {
     required String name,
     required String phoneNumber,
     required int numberOfInvitees,
-    required bool isOnWhatsapp,
+    // null = auto-detect: the field is left out of the request entirely, so
+    // the server tries WhatsApp first and falls back to SMS if it turns out
+    // the number isn't reachable there.
+    bool? isOnWhatsapp,
   }) async {
     final dio = await _dio();
     try {
-      final response = await dio.post('/events/$eventId/invitees', data: {
+      final data = <String, dynamic>{
         'name': name,
         'phone_number': phoneNumber,
         'number_of_invitees': numberOfInvitees,
-        'is_on_whatsapp': isOnWhatsapp,
-      });
+      };
+      if (isOnWhatsapp != null) {
+        data['is_on_whatsapp'] = isOnWhatsapp;
+      }
+      final response = await dio.post('/events/$eventId/invitees', data: data);
       return response.data as Map<String, dynamic>;
     } on DioException catch (e) {
       throw Exception(_errorMessage(e, 'Failed to add invitee'));

@@ -40,7 +40,9 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
   final _nameController = TextEditingController();
   final _phoneController = TextEditingController();
   final _numberController = TextEditingController();
-  bool _isOnWhatsapp = false;
+  // null = auto-detect (add flow only; edit always resolves to a real value
+  // before the dialog opens).
+  bool? _isOnWhatsapp;
   bool _isSubmitting = false;
   bool isBulkMode = false;
   Set<int> selectedInviteeIds = {};
@@ -1835,8 +1837,13 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
                               children: [
                                 const Text('On WhatsApp?'),
                                 const Spacer(),
-                                Switch(
+                                DropdownButton<bool?>(
                                   value: _isOnWhatsapp,
+                                  items: const [
+                                    DropdownMenuItem(value: null, child: Text('Auto-detect')),
+                                    DropdownMenuItem(value: true, child: Text('Yes')),
+                                    DropdownMenuItem(value: false, child: Text('No')),
+                                  ],
                                   onChanged: (value) {
                                     setModalState(() {
                                       _isOnWhatsapp = value;
@@ -1938,7 +1945,22 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
     _nameController.clear();
     _phoneController.clear();
     _numberController.clear();
-    _isOnWhatsapp = false;
+    _isOnWhatsapp = null;
+  }
+
+  /// Parses a "Yes/No/1/0/true/false" cell into a definite bool, or null
+  /// (auto-detect) for blank or unrecognized text — never silently "No".
+  bool? _parseOnWhatsapp(String? raw) {
+    final value = raw?.trim().toLowerCase();
+    if (value == null || value.isEmpty) return null;
+    if (value == 'yes' || value == '1' || value == 'true') return true;
+    if (value == 'no' || value == '0' || value == 'false') return false;
+    return null;
+  }
+
+  String _waLabel(dynamic value) {
+    if (value == null) return 'Auto-detect';
+    return value == true ? 'Yes' : 'No';
   }
 
   // Generate and save a sample file (CSV or Excel)
@@ -2153,8 +2175,7 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
           final name = values[0].trim();
           final phoneNumber = values[1].trim();
           final numberOfInvitees = int.tryParse(values[2].trim()) ?? 1;
-          final isOnWhatsapp = values.length > 3 ? 
-              values[3].trim().toLowerCase() == 'yes' || values[3].trim() == '1' : false;
+          final isOnWhatsapp = values.length > 3 ? _parseOnWhatsapp(values[3]) : null;
 
           parsedInvitees.add({
             'name': name,
@@ -2197,14 +2218,11 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
               numberOfInvitees = int.tryParse(value) ?? 1;
             }
 
-            // Check for WhatsApp status in 4th column if it exists
-            bool isOnWhatsapp = false;
-            if (row.length > 3 && row[3] != null) {
-              final cellValue = row[3]!.value;
-              if (cellValue != null) {
-                final whatsappStatus = cellValue.toString().trim().toLowerCase();
-                isOnWhatsapp = whatsappStatus == 'yes' || whatsappStatus == '1' || whatsappStatus == 'true';
-              }
+            // Check for WhatsApp status in 4th column if it exists. Missing
+            // or blank means auto-detect (null), not "not on WhatsApp".
+            bool? isOnWhatsapp;
+            if (row.length > 3 && row[3] != null && row[3]!.value != null) {
+              isOnWhatsapp = _parseOnWhatsapp(row[3]!.value.toString());
             }
 
             // Skip empty rows
@@ -2360,7 +2378,7 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
                           children: [
                             Text('Phone: ${invitee['phone_number']}'),
                             Text(
-                              'Invitees: ${invitee['number_of_invitees']} | WhatsApp: ${invitee['is_on_whatsapp'] ? 'Yes' : 'No'}',
+                              'Invitees: ${invitee['number_of_invitees']} | WhatsApp: ${_waLabel(invitee['is_on_whatsapp'])}',
                             ),
                           ],
                         ),
@@ -2948,8 +2966,12 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
                               children: [
                                 const Text('On WhatsApp?'),
                                 const Spacer(),
-                                Switch(
-                                  value: _isOnWhatsapp,
+                                DropdownButton<bool>(
+                                  value: _isOnWhatsapp ?? true,
+                                  items: const [
+                                    DropdownMenuItem(value: true, child: Text('Yes')),
+                                    DropdownMenuItem(value: false, child: Text('No')),
+                                  ],
                                   onChanged: (value) {
                                     setModalState(() {
                                       _isOnWhatsapp = value;
@@ -3024,7 +3046,7 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
         name: name,
         phoneNumber: phone,
         numberOfInvitees: numberOfInvitees,
-        isOnWhatsapp: _isOnWhatsapp,
+        isOnWhatsapp: _isOnWhatsapp ?? true,
       );
 
       setState(() {
