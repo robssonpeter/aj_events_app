@@ -42,18 +42,23 @@ class _ContactPickerScreenState extends State<ContactPickerScreen> {
       _error = null;
     });
 
-    final status = await FlutterContacts.permissions.request(PermissionType.read);
-
-    if (status != PermissionStatus.granted && status != PermissionStatus.limited) {
-      setState(() {
-        _loading = false;
-        _error = 'Contacts permission was not granted. '
-            'Enable it in your phone\'s Settings to import from your phone book.';
-      });
-      return;
-    }
-
+    // Everything here talks to a native platform channel, so wrap the whole
+    // thing — a permission-request failure (e.g. the native plugin isn't
+    // registered in this build) must still clear _loading, or the spinner
+    // spins forever with no way for the user to know what happened.
     try {
+      final status = await FlutterContacts.permissions.request(PermissionType.read);
+
+      if (status != PermissionStatus.granted && status != PermissionStatus.limited) {
+        if (!mounted) return;
+        setState(() {
+          _loading = false;
+          _error = 'Contacts permission was not granted. '
+              'Enable it in your phone\'s Settings to import from your phone book.';
+        });
+        return;
+      }
+
       final contacts = await FlutterContacts.getAll(properties: {ContactProperty.phone});
       final withPhones = contacts.where((c) => c.id != null && c.phones.isNotEmpty).toList()
         ..sort((a, b) =>
@@ -69,7 +74,11 @@ class _ContactPickerScreenState extends State<ContactPickerScreen> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = 'Could not read your contacts: $e';
+        _error = e.toString().contains('MissingPluginException')
+            ? 'Contacts import isn\'t available in this build yet — it needs a full '
+                'rebuild (not just a hot reload/restart) after being added. Please '
+                'do a clean rebuild and try again.'
+            : 'Could not read your contacts: $e';
       });
     }
   }
