@@ -76,6 +76,9 @@ class Contributor {
   final String status;
   final bool isOnWhatsapp;
   final DateTime? cardSentAt;
+  final String? whatsappMessageId;
+  final DateTime? deliveredAt;
+  final DateTime? readAt;
   final DateTime? lastReminderAt;
   final int? promotedInviteeId;
   final String? notes;
@@ -96,6 +99,9 @@ class Contributor {
     this.group,
     this.amount,
     this.cardSentAt,
+    this.whatsappMessageId,
+    this.deliveredAt,
+    this.readAt,
     this.lastReminderAt,
     this.promotedInviteeId,
     this.notes,
@@ -118,6 +124,9 @@ class Contributor {
       status: json['status']?.toString() ?? 'pending',
       isOnWhatsapp: json['is_on_whatsapp'] == true || json['is_on_whatsapp'] == 1,
       cardSentAt: _toDate(json['card_sent_at']),
+      whatsappMessageId: json['whatsapp_message_id']?.toString(),
+      deliveredAt: _toDate(json['delivered_at']),
+      readAt: _toDate(json['read_at']),
       lastReminderAt: _toDate(json['last_reminder_at']),
       promotedInviteeId: json['promoted_invitee_id'] == null ? null : _toInt(json['promoted_invitee_id']),
       notes: json['notes']?.toString(),
@@ -143,6 +152,10 @@ class Contributor {
         status: status,
         isOnWhatsapp: isOnWhatsapp,
         cardSentAt: DateTime.now(),
+        // A fresh send — delivery/read status isn't known client-side yet.
+        whatsappMessageId: null,
+        deliveredAt: null,
+        readAt: null,
         lastReminderAt: lastReminderAt,
         promotedInviteeId: promotedInviteeId,
         notes: notes,
@@ -152,6 +165,16 @@ class Contributor {
   bool get hasPromised => (amount ?? 0) > 0;
   bool get isSettled => hasPromised && balance <= 0;
   bool get cardSent => cardSentAt != null;
+
+  /// WhatsApp-style delivery status: 'read' (blue double tick), 'delivered'
+  /// (grey double tick), 'sent' (grey single tick), or null if no WhatsApp
+  /// send is on record (e.g. sent by SMS instead).
+  String? get waTickStatus {
+    if (readAt != null) return 'read';
+    if (deliveredAt != null) return 'delivered';
+    if (whatsappMessageId != null) return 'sent';
+    return null;
+  }
 
   /// Wording the kamati uses, not the database value.
   String get statusLabel {

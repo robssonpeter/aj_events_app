@@ -308,6 +308,22 @@ class _ContributorDetailScreenState extends State<ContributorDetailScreen> {
                   const SizedBox(width: 5),
                   Text('Card sent ${_dateLabel(_c.cardSentAt!)}',
                       style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                  if (_c.waTickStatus != null) ...[
+                    const SizedBox(width: 8),
+                    Icon(
+                      _c.waTickStatus == 'sent' ? Icons.done : Icons.done_all,
+                      size: 13,
+                      color: _c.waTickStatus == 'read' ? Colors.blue : Colors.grey.shade500,
+                    ),
+                    const SizedBox(width: 3),
+                    Text(
+                      {'sent': 'Sent', 'delivered': 'Delivered', 'read': 'Read'}[_c.waTickStatus]!,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: _c.waTickStatus == 'read' ? Colors.blue : Colors.grey.shade600,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ],

@@ -203,7 +203,16 @@ class ContributorTile extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
                       ),
-                      if (c.cardSent)
+                      if (c.waTickStatus != null)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 6),
+                          child: Icon(
+                            c.waTickStatus == 'sent' ? Icons.done : Icons.done_all,
+                            size: 13,
+                            color: c.waTickStatus == 'read' ? Colors.blue : Colors.grey.shade500,
+                          ),
+                        )
+                      else if (c.cardSent)
                         Padding(
                           padding: const EdgeInsets.only(left: 6),
                           child: Icon(Icons.send, size: 13, color: Colors.grey.shade500),
