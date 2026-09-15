@@ -22,6 +22,44 @@ class InviteeCard extends StatelessWidget {
     required this.onPhoneCall,
   });
 
+  /// WhatsApp-style delivery status for this invitee's card: 'read' (blue
+  /// double tick), 'delivered' (grey double tick), 'sent' (grey single
+  /// tick), or null (no WhatsApp send on record).
+  String? get _waTickStatus {
+    final invitations = (invitee['invitations'] as List?) ?? [];
+    final waInvitations = invitations
+        .cast<Map>()
+        .where((i) => i['comm_type'] == 'whatsapp')
+        .toList()
+      ..sort((a, b) =>
+          (b['created_at']?.toString() ?? '').compareTo(a['created_at']?.toString() ?? ''));
+
+    if (waInvitations.isEmpty) return null;
+    final latest = waInvitations.first;
+
+    if (latest['read_at'] != null) return 'read';
+    if (latest['delivered_at'] != null) return 'delivered';
+    if (latest['whatsapp_message_id'] != null) return 'sent';
+    return null;
+  }
+
+  Widget _buildDeliveryIndicator() {
+    final status = _waTickStatus;
+    if (status == null) return const SizedBox.shrink();
+
+    final label = {'sent': 'Sent', 'delivered': 'Delivered', 'read': 'Read'}[status]!;
+    final color = status == 'read' ? Colors.blue : Colors.grey;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(status == 'sent' ? Icons.done : Icons.done_all, size: 14, color: color),
+        const SizedBox(width: 4),
+        Text(label, style: TextStyle(fontSize: 12, color: color)),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isRemoving = invitee['_isRemoving'] == true;
@@ -119,13 +157,19 @@ class InviteeCard extends StatelessWidget {
                           ],
                         ),
                         const SizedBox(height: 4),
-                        Text(
-                          'Guests: ${invitee['number_of_invitees']}',
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodyMedium
-                              ?.copyWith(color: Colors.black54),
-                          overflow: TextOverflow.ellipsis,
+                        Row(
+                          children: [
+                            Text(
+                              'Guests: ${invitee['number_of_invitees']}',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodyMedium
+                                  ?.copyWith(color: Colors.black54),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const Spacer(),
+                            _buildDeliveryIndicator(),
+                          ],
                         ),
                         if (invitee['attendance_status'] == 'attending' ||
                             invitee['attendance_status'] == 'not_attending') ...[
