@@ -237,14 +237,6 @@ class _CustomizeInvitationScreenState extends State<CustomizeInvitationScreen> {
     }
   }
 
-  Future<int> _getAndroidSdkVersion() async {
-    if (Platform.isAndroid) {
-      final version = Platform.version.split('.').first;
-      return int.tryParse(version) ?? 0;
-    }
-    return 0;
-  }
-
   Future<void> _requestPermissions(ImageSource source) async {
     try {
       if (source == ImageSource.camera) {
@@ -259,37 +251,11 @@ class _CustomizeInvitationScreenState extends State<CustomizeInvitationScreen> {
           _showPermissionDeniedDialog('Camera');
           return;
         }
-      } else {
-        // For gallery access
-        if (Platform.isAndroid) {
-          final sdkVersion = await _getAndroidSdkVersion();
-          Permission permission = sdkVersion >= 33 ? Permission.photos : Permission.storage;
-
-          // Check if permission is already granted
-          final permissionStatus = await permission.status;
-          if (permissionStatus.isGranted) {
-            return; // Permission already granted, no need to request
-          }
-
-          final requestStatus = await permission.request();
-          if (requestStatus != PermissionStatus.granted) {
-            _showPermissionDeniedDialog('Gallery');
-            return;
-          }
-        } else if (Platform.isIOS) {
-          // Check if photos permission is already granted
-          final photoStatus = await Permission.photos.status;
-          if (photoStatus.isGranted) {
-            return; // Permission already granted, no need to request
-          }
-
-          final requestStatus = await Permission.photos.request();
-          if (requestStatus != PermissionStatus.granted) {
-            _showPermissionDeniedDialog('Gallery');
-            return;
-          }
-        }
       }
+      // For gallery access, no permission request is needed: image_picker
+      // launches the system photo picker (Android Photo Picker / PHPicker on
+      // iOS), which doesn't require READ_MEDIA_IMAGES/READ_EXTERNAL_STORAGE
+      // or the iOS photo library permission.
     } catch (e) {
       debugPrint('Permission request error: $e');
     }

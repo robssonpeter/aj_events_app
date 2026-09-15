@@ -1966,26 +1966,8 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
   // Generate and save a sample file (CSV or Excel)
   Future<void> _downloadSampleFile({bool asExcel = false}) async {
     try {
-      // Request storage permission
-      final permissionStatus = await _requestStoragePermission();
-      if (!permissionStatus.isGranted) {
-        if (permissionStatus.isPermanentlyDenied) {
-          // Show dialog to guide user to app settings
-          final goToSettings = await _showPermissionSettingsDialog(
-            'Storage Permission Required',
-            'To save the sample file, this app needs storage permission. Please enable it in app settings.'
-          );
-
-          if (goToSettings) {
-            await openAppSettings();
-          }
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Storage permission is required to save the sample file')),
-          );
-        }
-        return;
-      }
+      // Saved into the app's own documents directory, which is app-private
+      // sandboxed storage — no runtime permission is needed to write there.
 
       // Get download directory
       final directory = await getApplicationDocumentsDirectory();
@@ -2654,26 +2636,8 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
         const SnackBar(content: Text('Preparing to share image...')),
       );
 
-      // Request storage permission for temporary file access
-      final permissionStatus = await _requestStoragePermission();
-      if (!permissionStatus.isGranted) {
-        if (permissionStatus.isPermanentlyDenied) {
-          // Show dialog to guide user to app settings
-          final goToSettings = await _showPermissionSettingsDialog(
-            'Storage Permission Required',
-            'To share images, this app needs storage permission. Please enable it in app settings.'
-          );
-
-          if (goToSettings) {
-            await openAppSettings();
-          }
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Storage permission is required to share the image')),
-          );
-        }
-        return;
-      }
+      // Downloaded into the temp cache dir, which is app-private — no
+      // permission is needed to write or share it from there.
 
       // Configure Dio with timeout
       final dio = Dio();
@@ -2793,47 +2757,18 @@ class _ManageInviteesScreenState extends State<ManageInviteesScreen> {
   Future<PermissionStatus> _requestStoragePermission() async {
     // Handle permissions based on platform and Android version
     if (Platform.isAndroid) {
-      // For Android 13+ (API level 33+), request media permissions
-      if (await Permission.photos.status != PermissionStatus.granted) {
-        final photosStatus = await Permission.photos.request();
-        debugPrint('Photos permission status: $photosStatus');
-
-        // If photos permission is granted, we can return early
-        if (photosStatus.isGranted) {
-          return PermissionStatus.granted;
-        }
-      } else {
-        // Photos permission is already granted
-        return PermissionStatus.granted;
-      }
-
-      // For Android 10-12, request storage permission if photos permission was denied
+      // Saving to the gallery goes through MediaStore (via image_gallery_saver),
+      // which needs no runtime permission on Android 10+ (API 29+). The only
+      // case that still needs a permission is Android 9 (API 28) and below,
+      // which requires WRITE_EXTERNAL_STORAGE — declared in the manifest with
+      // android:maxSdkVersion="28", so permission_handler treats this request
+      // as a no-op (auto-granted) on newer OS versions.
       if (await Permission.storage.status != PermissionStatus.granted) {
         final storageStatus = await Permission.storage.request();
         debugPrint('Storage permission status: $storageStatus');
-
-        // If storage permission is granted, we can return early
-        if (storageStatus.isGranted) {
-          return PermissionStatus.granted;
-        }
-      } else {
-        // Storage permission is already granted
-        return PermissionStatus.granted;
+        return storageStatus;
       }
-
-      // Check if we have at least one permission granted
-      if (await Permission.photos.isGranted || 
-          await Permission.storage.isGranted) {
-        return PermissionStatus.granted;
-      } else {
-        // If all permissions are permanently denied, show a dialog to guide the user to settings
-        if (await Permission.photos.isPermanentlyDenied ||
-            await Permission.storage.isPermanentlyDenied) {
-          // This will be handled by the calling function
-          return PermissionStatus.permanentlyDenied;
-        }
-        return PermissionStatus.denied;
-      }
+      return PermissionStatus.granted;
     } else if (Platform.isIOS) {
       // iOS typically requires photos permission for gallery access
       if (await Permission.photos.status != PermissionStatus.granted) {

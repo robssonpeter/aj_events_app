@@ -1,11 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Android 13+ -->
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
-    <uses-permission android:name="android.permission.READ_MEDIA_STORAGE" />
-
-    <!-- For all Android versions -->
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <!-- Gallery access uses the system photo picker (image_picker) and MediaStore
+         writes (image_gallery_saver), neither of which needs READ_MEDIA_IMAGES,
+         READ_MEDIA_VIDEO, or READ_EXTERNAL_STORAGE. WRITE_EXTERNAL_STORAGE is kept
+         only for saving images to the gallery on Android 9 (API 28) and below,
+         before scoped storage / MediaStore made it unnecessary. -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
