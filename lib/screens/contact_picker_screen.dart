@@ -103,7 +103,7 @@ class _ContactPickerScreenState extends State<ContactPickerScreen> {
     });
   }
 
-  void _confirm() {
+  Future<void> _confirm() async {
     final picked = _all
         .where((c) => _selectedIds.contains(c.id))
         .map((c) => PickedContact(
@@ -111,7 +111,17 @@ class _ContactPickerScreenState extends State<ContactPickerScreen> {
               phone: c.phones.first.number,
             ))
         .toList();
-    Navigator.pop(context, picked);
+
+    // A saved contact name is often a nickname ("My Brother") rather than the
+    // full name someone wants on the list — let them fix names before this
+    // actually leaves the picker. The phone number is left alone; it's
+    // already correct, straight from the device.
+    final reviewed = await Navigator.of(context).push<List<PickedContact>>(
+      MaterialPageRoute(builder: (_) => ContactImportReviewScreen(contacts: picked)),
+    );
+
+    if (reviewed == null || !mounted) return;
+    Navigator.pop(context, reviewed);
   }
 
   @override
@@ -194,6 +204,108 @@ class _ContactPickerScreenState extends State<ContactPickerScreen> {
                     ),
                   ],
                 ),
+    );
+  }
+}
+
+/// Shows exactly the contacts the user just selected, letting them rename
+/// any of them (e.g. a phone-book nickname like "My Brother" -> a full name)
+/// before the import actually happens. Phone numbers are shown but not
+/// editable — they're already correct, straight from the device. Backing out
+/// (the app-bar back arrow) returns to the picker with the selection intact;
+/// "Import" is the only way to finish and hand the final list back.
+class ContactImportReviewScreen extends StatefulWidget {
+  final List<PickedContact> contacts;
+
+  const ContactImportReviewScreen({super.key, required this.contacts});
+
+  @override
+  State<ContactImportReviewScreen> createState() => _ContactImportReviewScreenState();
+}
+
+class _ContactImportReviewScreenState extends State<ContactImportReviewScreen> {
+  late List<PickedContact> _contacts;
+
+  @override
+  void initState() {
+    super.initState();
+    _contacts = List.of(widget.contacts);
+  }
+
+  Future<void> _editName(int index) async {
+    final controller = TextEditingController(text: _contacts[index].name);
+
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Edit name'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(border: OutlineInputBorder()),
+          onSubmitted: (value) => Navigator.pop(dialogContext, value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, controller.text),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    final trimmed = newName?.trim();
+    if (trimmed == null || trimmed.isEmpty) return;
+
+    setState(() {
+      _contacts[index] = PickedContact(name: trimmed, phone: _contacts[index].phone);
+    });
+  }
+
+  void _import() => Navigator.pop(context, _contacts);
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Review ${_contacts.length} contact${_contacts.length == 1 ? '' : 's'}'),
+      ),
+      body: ListView.separated(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        itemCount: _contacts.length,
+        separatorBuilder: (_, _) => const Divider(height: 1),
+        itemBuilder: (context, i) {
+          final c = _contacts[i];
+          return ListTile(
+            title: Text(c.name),
+            subtitle: Text(c.phone),
+            trailing: IconButton(
+              icon: const Icon(Icons.edit_outlined),
+              tooltip: 'Edit name',
+              onPressed: () => _editName(i),
+            ),
+            onTap: () => _editName(i),
+          );
+        },
+      ),
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: FilledButton(
+              onPressed: _contacts.isEmpty ? null : _import,
+              child: Text('Import ${_contacts.length} contact${_contacts.length == 1 ? '' : 's'}'),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
